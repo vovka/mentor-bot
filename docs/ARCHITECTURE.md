@@ -10,9 +10,9 @@ flowchart LR
   You((you)) <-- Telegram chat --> BOT[mentor bot]
   BOT -- 08:00 brief --> You
   BOT -- pinned plan --> You
-  BOT --> P1[(tusk/)]
-  BOT --> P2[(campaignloop/)]
-  BOT --> P3[(new-project/)]
+  BOT --> P1[(project-one/)]
+  BOT --> P2[(project-two/)]
+  BOT --> P3[(project-three/)]
   BOT -. subscriptions, no API keys .-> CX[codex exec]
   BOT -. secondary .-> CL[claude -p]
 ```
@@ -165,7 +165,7 @@ flowchart LR
 ```mermaid
 flowchart LR
   subgraph data/projects
-    T[tusk/] ~~~ C[campaignloop/] ~~~ N[new-project/]
+    T[project-one/] ~~~ C[project-two/] ~~~ N[project-three/]
   end
   T & C & N --> F["project.md (repo: line)<br/>timeline.md · plan.md"]
   F --> DISC[Store.projects discovers folders at run time]
