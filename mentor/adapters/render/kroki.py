@@ -4,6 +4,7 @@ import urllib.error
 import urllib.request
 
 _TIMEOUT = 30
+# kroki.io sits behind Cloudflare, which rejects urllib's default User-Agent (error 1010).
 
 
 class KrokiRenderer:
@@ -12,7 +13,7 @@ class KrokiRenderer:
 
     def render(self, mermaid: str) -> bytes:
         req = urllib.request.Request(
-            self._url, data=mermaid.encode(), headers={"Content-Type": "text/plain"}
+            self._url, data=mermaid.encode(), headers={"Content-Type": "text/plain", "User-Agent": "mentor-bot/1.0"}
         )
         try:
             with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
