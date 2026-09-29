@@ -82,15 +82,17 @@ sequenceDiagram
   TG->>AD: getUpdates
   AD->>HU: update
   HU->>ST: lock · dedup update_id · append history/today.md
-  HU->>HM: text
+  HU->>HM: text, message_id
+  HM->>TG: 👀 reaction · "typing…" every 4 s until reply
   HM->>ST: settings · summary.md · last 2 days · projects
   HM->>BR: prompt (gpt-5.5 low)
   BR-->>HM: {reply, document, actions:[replan]}
+  HM->>TG: 🤔 reaction (heavy action started)
   HM->>BR: replan prompt (gpt-6-astra high)
   BR-->>HM: {document: new plan.md}
   HM->>ST: write plan.md · append reply
   HM->>AD: send(reply) · edit(pinned)
-  AD->>TG: sendMessage · editMessageText
+  AD->>TG: sendMessage · editMessageText · reaction cleared
   TG->>You: reply + updated pin
 ```
 
