@@ -1,5 +1,4 @@
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
 from mentor.adapters.store.files import FileStore
 from mentor.domain.actions import BrainResult, BrainTask
@@ -7,17 +6,16 @@ from mentor.usecases import compact
 from tests.fixed_clock import FixedClock
 
 
-class _SummaryWritingBrain:
-    """Fake brain that rewrites summary.md, like the real CLI does under workspace-write."""
+class _DocBrain:
+    """Fake brain that returns a document instead of writing summary.md, per the read-only sandbox."""
 
-    def __init__(self, new_summary: str):
-        self._new_summary = new_summary
+    def __init__(self, document: str | None):
+        self._document = document
         self.tasks: list[BrainTask] = []
 
     def run(self, task: BrainTask) -> BrainResult:
         self.tasks.append(task)
-        (Path(task.cwd) / "summary.md").write_text(self._new_summary)
-        return BrainResult(reply="folded", actions=[], raw={})
+        return BrainResult(reply="folded", actions=[], raw={}, document=self._document)
 
 
 def _seed_days(store: FileStore, today: date, count: int) -> None:
@@ -30,7 +28,7 @@ def test_folds_only_days_older_than_keep_days(tmp_path):
     store = FileStore(tmp_path)
     today = date(2026, 9, 29)
     _seed_days(store, today, 20)
-    brain = _SummaryWritingBrain("folded summary")
+    brain = _DocBrain("folded summary")
     clock = FixedClock(datetime(2026, 9, 29))
 
     status = compact.run(store, brain, clock, keep_days=14)
@@ -51,9 +49,22 @@ def test_second_call_has_nothing_to_compact(tmp_path):
     today = date(2026, 9, 29)
     _seed_days(store, today, 20)
     clock = FixedClock(datetime(2026, 9, 29))
-    compact.run(store, _SummaryWritingBrain("first fold"), clock, keep_days=14)
+    compact.run(store, _DocBrain("first fold"), clock, keep_days=14)
 
-    status = compact.run(store, _SummaryWritingBrain("second fold"), clock, keep_days=14)
+    status = compact.run(store, _DocBrain("second fold"), clock, keep_days=14)
 
     assert status == "nothing to compact"
     assert store.read_summary() == "first fold"
+
+
+def test_no_document_leaves_summary_unchanged_and_state_unadvanced(tmp_path):
+    store = FileStore(tmp_path)
+    today = date(2026, 9, 29)
+    _seed_days(store, today, 20)
+    clock = FixedClock(datetime(2026, 9, 29))
+
+    status = compact.run(store, _DocBrain(None), clock, keep_days=14)
+
+    assert status == "compact failed: no document"
+    assert store.read_summary() == ""
+    assert store.read_state().get("compacted_through") is None

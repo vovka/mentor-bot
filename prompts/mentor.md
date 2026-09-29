@@ -28,6 +28,7 @@ about past conversations or project details not shown above.
 
 Reply with JSON ONLY, matching the schema: {{"reply": string, "actions": [{{"kind": ..., "args": {{...}}}}]}}.
 No prose outside the JSON. "reply" is plain text, Telegram-friendly, short — no Markdown.
+`document` must be null.
 
 ## When to emit an action
 

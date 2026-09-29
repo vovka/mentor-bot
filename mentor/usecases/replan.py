@@ -15,10 +15,16 @@ def run(store, brain, chat, clock, reason: str) -> str:
     task = BrainTask(
         prompt=_build_prompt(store, today, reason),
         cwd=str(store.data_dir),
-        write=True,
+        write=False,
         settings=BrainSettings(**store.read_settings()["heavy"]),
     )
     result = brain.run(task)
+
+    summary = result.reply
+    if result.document:
+        store.write_plan(result.document)
+    else:
+        summary = "plan.md unchanged (brain returned no document). " + summary
 
     pinned = _render_pinned(store.read_plan())
     with locked(store.data_dir):
@@ -27,7 +33,7 @@ def run(store, brain, chat, clock, reason: str) -> str:
         state["last_replan"] = today.isoformat()
         store.write_state(state)
 
-    return result.reply
+    return summary
 
 
 def _build_prompt(store, today, reason: str) -> str:

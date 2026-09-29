@@ -18,10 +18,13 @@ def run(store, brain, clock, keep_days: int = 14) -> str:
     task = BrainTask(
         prompt=_build_prompt(store, old_days),
         cwd=str(store.data_dir / "history"),
-        write=True,
+        write=False,
         settings=BrainSettings(**store.read_settings()["heavy"]),
     )
-    brain.run(task)
+    result = brain.run(task)
+    if not result.document:
+        return "compact failed: no document"
+    store.write_summary(result.document)
 
     with locked(store.data_dir):
         state = store.read_state()

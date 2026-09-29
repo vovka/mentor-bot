@@ -62,7 +62,9 @@ class CodexBrain:
         try:
             data = json.loads(out_path.read_text())
             actions = [_action(a) for a in data["actions"]]
-            return BrainResult(reply=data["reply"], actions=actions, raw=data)
+            return BrainResult(
+                reply=data["reply"], actions=actions, raw=data, document=data.get("document")
+            )
         except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError):
             reply = result.stdout.strip() or f"brain error: {result.stderr.strip()[-300:]}"
             return BrainResult(reply=reply, actions=[], raw={"stderr": result.stderr})

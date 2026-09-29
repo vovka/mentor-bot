@@ -32,3 +32,4 @@ class BrainResult:
     reply: str
     actions: list[Action]
     raw: dict[str, Any]
+    document: str | None = None

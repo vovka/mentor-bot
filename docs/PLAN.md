@@ -17,10 +17,12 @@ stdlib-first, pytest.
 Two design changes from the docs, driven by Codex facts found on this machine:
 
 1. Codex has no subagents → delegation is **structured output** for both CLIs: the chat brain
-   returns `{reply, actions:[replan|scout|set_settings|add_project]}`; `handle_message` executes
-   actions in code. The chat call gets **no write tools**; only code-triggered `replan`/`compact`
-   calls get `workspace-write` over `data/`. Model switching is validated by code, never by the
-   agent editing `settings.json`.
+   returns `{reply, document, actions:[replan|scout|set_settings|add_project]}`; `handle_message`
+   executes actions in code. The brain never writes files — the sandbox is always `read-only`
+   (workspace-write needs bubblewrap, which fails under this host's apparmor userns restriction
+   and in containers). `replan`/`compact` get the new plan/summary back in `document` and the
+   use case writes it via the store. Model switching is validated by code, never by the agent
+   editing `settings.json`.
 2. `~/.codex/config.toml` sets `model_provider="headroom"` (local proxy 127.0.0.1:8787) →
    every codex call passes `--ignore-user-config` (auth.json still applies; MCP servers in the user config hang headless) plus a subprocess timeout.
 

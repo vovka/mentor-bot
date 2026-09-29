@@ -2,6 +2,7 @@
   "type": "object",
   "properties": {
     "reply": { "type": "string" },
+    "document": { "type": ["string", "null"] },
     "actions": {
       "type": "array",
       "items": {
@@ -30,6 +31,6 @@
       }
     }
   },
-  "required": ["reply", "actions"],
+  "required": ["reply", "document", "actions"],
   "additionalProperties": false
 }
