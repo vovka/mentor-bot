@@ -1,7 +1,8 @@
 .env
-data/history/*
-!data/history/.gitkeep
-data/state.json
 __pycache__/
 *.pyc
 .venv/
+# personal data: its own private repo inside data/
+data/
+tests/e2e/evidence/
+*.egg-info/

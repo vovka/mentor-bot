@@ -34,6 +34,7 @@ While it works you see 👀 on your message and "typing…"; 🤔 means a heavy 
 ```bash
 uv venv && uv pip install -e '.[dev]'
 cp .env.example .env         # TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+cp -r data.example data       # your plans live here; keep it in its own private repo
 codex login                  # or: claude setup-token -> CLAUDE_CODE_OAUTH_TOKEN in .env
 mentor doctor                # checks Telegram + brain
 mentor serve                 # long-poll; add --with-scheduler for built-in jobs
