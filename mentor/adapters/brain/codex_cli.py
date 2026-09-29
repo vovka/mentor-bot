@@ -61,7 +61,14 @@ class CodexBrain:
     def _parse(self, out_path: Path, result: subprocess.CompletedProcess) -> BrainResult:
         try:
             data = json.loads(out_path.read_text())
-            actions = [Action(kind=a["kind"], args=a.get("args", {})) for a in data["actions"]]
+            actions = [_action(a) for a in data["actions"]]
             return BrainResult(reply=data["reply"], actions=actions, raw=data)
         except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError):
-            return BrainResult(reply=result.stdout, actions=[], raw={"stderr": result.stderr})
+            reply = result.stdout.strip() or f"brain error: {result.stderr.strip()[-300:]}"
+            return BrainResult(reply=reply, actions=[], raw={"stderr": result.stderr})
+
+
+def _action(item: dict) -> Action:
+    """Strict schemas force every arg key to be present; drop the nulls."""
+    args = {k: v for k, v in item.get("args", {}).items() if v is not None}
+    return Action(kind=item["kind"], args=args)

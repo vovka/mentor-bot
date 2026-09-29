@@ -7,13 +7,25 @@
       "items": {
         "type": "object",
         "properties": {
-          "kind": {
-            "type": "string",
-            "enum": ["replan", "scout", "set_settings", "add_project"]
-          },
-          "args": { "type": "object" }
+          "kind": { "type": "string", "enum": ["replan", "scout", "set_settings", "add_project"] },
+          "args": {
+            "type": "object",
+            "properties": {
+              "reason": { "type": ["string", "null"] },
+              "project": { "type": ["string", "null"] },
+              "question": { "type": ["string", "null"] },
+              "provider": { "type": ["string", "null"] },
+              "model": { "type": ["string", "null"] },
+              "effort": { "type": ["string", "null"] },
+              "heavy": { "type": ["boolean", "null"] },
+              "name": { "type": ["string", "null"] },
+              "repo_path": { "type": ["string", "null"] }
+            },
+            "required": ["reason", "project", "question", "provider", "model", "effort", "heavy", "name", "repo_path"],
+            "additionalProperties": false
+          }
         },
-        "required": ["kind"],
+        "required": ["kind", "args"],
         "additionalProperties": false
       }
     }
