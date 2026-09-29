@@ -5,7 +5,7 @@ from mentor.domain.conversation import Update
 from mentor.usecases import handle_message
 
 
-def run(store, brain, chat, clock, update: Update) -> None:
+def run(store, brain, chat, clock, update: Update, renderer=None) -> None:
     with locked(store.data_dir):
         state = store.read_state()
         if update.update_id <= state.get("last_update_id", 0):
@@ -16,4 +16,4 @@ def run(store, brain, chat, clock, update: Update) -> None:
     if not update.text.strip():
         return
 
-    handle_message.run(store, brain, chat, clock, update.text, update.message_id)
+    handle_message.run(store, brain, chat, clock, update.text, update.message_id, renderer)

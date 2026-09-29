@@ -8,7 +8,7 @@
       "items": {
         "type": "object",
         "properties": {
-          "kind": { "type": "string", "enum": ["replan", "scout", "set_settings", "add_project"] },
+          "kind": { "type": "string", "enum": ["replan", "scout", "set_settings", "add_project", "send_image"] },
           "args": {
             "type": "object",
             "properties": {
@@ -20,9 +20,11 @@
               "effort": { "type": ["string", "null"] },
               "heavy": { "type": ["boolean", "null"] },
               "name": { "type": ["string", "null"] },
-              "repo_path": { "type": ["string", "null"] }
+              "repo_path": { "type": ["string", "null"] },
+              "diagram": { "type": ["string", "null"] },
+              "caption": { "type": ["string", "null"] }
             },
-            "required": ["reason", "project", "question", "provider", "model", "effort", "heavy", "name", "repo_path"],
+            "required": ["reason", "project", "question", "provider", "model", "effort", "heavy", "name", "repo_path", "diagram", "caption"],
             "additionalProperties": false
           }
         },

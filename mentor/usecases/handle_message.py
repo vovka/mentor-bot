@@ -5,7 +5,7 @@ from pathlib import Path
 
 from mentor.domain.actions import BrainTask
 from mentor.domain.settings import ALLOWED, BrainSettings
-from mentor.usecases import add_project, change_settings
+from mentor.usecases import add_project, change_settings, send_image
 from mentor.usecases.busy import busy
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "mentor.md"
@@ -22,10 +22,11 @@ def _dispatch_scout(store, brain, chat, clock, args):
 
 
 _DISPATCH = {
-    "set_settings": lambda store, brain, chat, clock, args: change_settings.run(store, args),
-    "add_project": lambda store, brain, chat, clock, args: add_project.run(store, args),
-    "replan": _dispatch_replan,
-    "scout": _dispatch_scout,
+    "set_settings": lambda s, brain, chat, clock, args: change_settings.run(s.store, args),
+    "add_project": lambda s, brain, chat, clock, args: add_project.run(s.store, args),
+    "replan": lambda s, brain, chat, clock, args: _dispatch_replan(s.store, brain, chat, clock, args),
+    "scout": lambda s, brain, chat, clock, args: _dispatch_scout(s.store, brain, chat, clock, args),
+    "send_image": lambda s, brain, chat, clock, args: send_image.run(s.renderer, chat, args),
 }
 
 
@@ -54,21 +55,27 @@ def _build_task(store, clock, text: str) -> BrainTask:
 _HEAVY = {"replan", "scout"}
 
 
-def run(store, brain, chat, clock, text: str, message_id: int = 0) -> str:
+def run(store, brain, chat, clock, text: str, message_id: int = 0, renderer=None) -> str:
     store.append_history(f"user: {text}")
     with busy(chat, message_id):
-        reply = _answer(store, brain, chat, clock, text, message_id)
+        reply = _answer(_Services(store, renderer), brain, chat, clock, text, message_id)
         store.append_history(f"bot: {reply}")
         chat.send(reply)
     return reply
 
 
-def _answer(store, brain, chat, clock, text: str, message_id: int) -> str:
+class _Services:
+    def __init__(self, store, renderer):
+        self.store, self.renderer = store, renderer
+
+
+def _answer(services, brain, chat, clock, text: str, message_id: int) -> str:
+    store = services.store
     result = brain.run(_build_task(store, clock, text))
     actions = [a for a in result.actions if a.kind in _DISPATCH]
     if message_id and any(a.kind in _HEAVY for a in actions):
         chat.react(message_id, "🤔")
-    action_results = [_DISPATCH[a.kind](store, brain, chat, clock, a.args) for a in actions]
+    action_results = [_DISPATCH[a.kind](services, brain, chat, clock, a.args) for a in actions]
     reply = result.reply
     if action_results:
         reply += "\n\n" + "\n".join(action_results)

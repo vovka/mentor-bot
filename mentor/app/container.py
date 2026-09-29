@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from mentor.adapters.brain.claude_cli import ClaudeBrain
 from mentor.adapters.brain.codex_cli import CodexBrain
 from mentor.adapters.clock import SystemClock
+from mentor.adapters.render.kroki import KrokiRenderer
 from mentor.adapters.store.files import FileStore
 from mentor.adapters.telegram.api import TelegramChat
 from mentor.app.config import Config
@@ -12,6 +13,7 @@ from mentor.domain.settings import BrainSettings
 from mentor.ports.brain import Brain
 from mentor.ports.chat import Chat
 from mentor.ports.clock import Clock
+from mentor.ports.renderer import Renderer
 from mentor.ports.store import Store
 
 _SCHEMA_PATH = "prompts/output_schema.json"
@@ -23,6 +25,7 @@ class Container:
     brain: Brain
     chat: Chat
     clock: Clock
+    renderer: Renderer
 
 
 def brain_for(settings: BrainSettings) -> Brain:
@@ -42,4 +45,5 @@ def build(config: Config) -> Container:
         brain=brain_for(settings),
         chat=TelegramChat(config.telegram_bot_token, config.telegram_chat_id),
         clock=SystemClock(config.tz),
+        renderer=KrokiRenderer(config.kroki_url),
     )

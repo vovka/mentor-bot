@@ -39,7 +39,7 @@ class BotApiStub:
             return {"ok": True, "result": [u for u in self._updates if u["update_id"] >= offset]}
         if method == "getMe":
             return {"ok": True, "result": {"id": 1, "is_bot": True, "username": "stub_bot"}}
-        if method == "sendMessage":
+        if method in ("sendMessage", "sendPhoto"):
             msg_id = self._next_message_id
             self._next_message_id += 1
             return {"ok": True, "result": {"message_id": msg_id}}
@@ -58,7 +58,9 @@ def _handler_for(stub: BotApiStub):
         def do_POST(self):
             method = self.path.rsplit("/", 1)[-1]
             length = int(self.headers.get("Content-Length", 0))
-            payload = json.loads(self.rfile.read(length)) if length else {}
+            raw = self.rfile.read(length) if length else b""
+            is_json = self.headers.get("Content-Type", "").startswith("application/json")
+            payload = json.loads(raw) if raw and is_json else {"_bytes": len(raw)}
             body = json.dumps(stub.handle(method, payload)).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

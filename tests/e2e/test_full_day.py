@@ -9,6 +9,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from mentor.adapters.brain.fake import FakeBrain
+from mentor.adapters.render.fake import FakeRenderer
 from mentor.adapters.store.files import FileStore
 from mentor.adapters.telegram.api import TelegramChat
 from mentor.app.container import Container
@@ -29,7 +30,8 @@ def _build_container(tmp_path, stub, monkeypatch) -> Container:
     store.add_project("alpha", "/repo/alpha")
     store.add_project("beta", "/repo/beta")
     chat = TelegramChat("stub-token", str(stub.chat_id))
-    return Container(store=store, brain=FakeBrain([]), chat=chat, clock=FixedClock(datetime(2026, 9, 29, 8, 0)))
+    clock = FixedClock(datetime(2026, 9, 29, 8, 0))
+    return Container(store=store, brain=FakeBrain([]), chat=chat, clock=clock, renderer=FakeRenderer(b"PNG"))
 
 
 def _step(container, stub, offset, text, results):
@@ -37,7 +39,10 @@ def _step(container, stub, offset, text, results):
     stub.enqueue(text)
     container.brain = FakeBrain(results)
     for update in container.chat.poll(offset):
-        handle_update.run(container.store, container.brain, container.chat, container.clock, update)
+        handle_update.run(
+            container.store, container.brain, container.chat, container.clock, update,
+            renderer=container.renderer,
+        )
         offset = update.update_id + 1
     return offset
 
@@ -72,6 +77,14 @@ def test_full_day_scenario(tmp_path, monkeypatch):
     assert "Settings updated" in last_send[1]["text"]
     methods = [c[0] for c in stub.calls]
     assert "sendChatAction" in methods and methods[-1] == "setMessageReaction"
+
+    # b2. send_image action -> rendered via the fake renderer, posted with multipart sendPhoto.
+    image_action = [Action(kind="send_image", args={"diagram": "gantt\n  title t", "caption": "Plan"})]
+    results = [BrainResult(reply="here is the gantt", actions=image_action, raw={})]
+    offset = _step(container, stub, offset, "draw the plan", results)
+    photos = [c for c in stub.calls if c[0] == "sendPhoto"]
+    assert len(photos) == 1 and photos[0][1]["_bytes"] > len(b"PNG")
+    assert "(image sent)" in [c for c in stub.calls if c[0] == "sendMessage"][-1][1]["text"]
 
     # c. replan action -> plan.md updated, sendMessage + pinChatMessage on first run.
     calls_before = len(stub.calls)

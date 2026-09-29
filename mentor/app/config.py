@@ -23,6 +23,7 @@ class Config:
     data_dir: Path
     tz: str
     claude_code_oauth_token: str
+    kroki_url: str
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -33,4 +34,5 @@ class Config:
             data_dir=Path(os.environ.get("DATA_DIR", "./data")),
             tz=os.environ.get("TZ", "Europe/Kyiv"),
             claude_code_oauth_token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", ""),
+            kroki_url=os.environ.get("KROKI_URL", "https://kroki.io"),
         )

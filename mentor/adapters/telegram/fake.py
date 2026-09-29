@@ -9,6 +9,7 @@ class FakeChat:
         self.edits: list[tuple[int, str]] = []
         self.pinned: list[int] = []
         self.reactions: list[tuple[int, str | None]] = []
+        self.photos: list[tuple[bytes, str]] = []
         self.typing_calls = 0
         self._updates = list(updates or [])
         self._next_id = 1
@@ -18,6 +19,10 @@ class FakeChat:
         msg_id = self._next_id
         self._next_id += 1
         return msg_id
+
+    def send_photo(self, png: bytes, caption: str) -> int:
+        self.photos.append((png, caption))
+        return self.send(f"[photo] {caption}")
 
     def edit(self, id: int, text: str) -> None:
         self.edits.append((id, text))

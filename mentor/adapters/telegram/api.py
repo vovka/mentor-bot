@@ -2,6 +2,7 @@
 
 import json
 import os
+import uuid
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -37,6 +38,15 @@ class TelegramChat:
             )
             msg_id = result["result"]["message_id"]
         return msg_id
+
+    def send_photo(self, png: bytes, caption: str) -> int:
+        fields = {"chat_id": self._chat_id, "caption": caption[:1024]}
+        body, content_type = _multipart(fields, "photo", "diagram.png", png)
+        req = urllib.request.Request(
+            f"{self._base}/sendPhoto", data=body, headers={"Content-Type": content_type}
+        )
+        with urllib.request.urlopen(req, timeout=_CALL_TIMEOUT * 3) as resp:
+            return json.loads(resp.read())["result"]["message_id"]
 
     def edit(self, id: int, text: str) -> None:
         self._call(
@@ -86,3 +96,20 @@ class TelegramChat:
             at=datetime.fromtimestamp(message["date"], tz=timezone.utc),
             message_id=message["message_id"],
         )
+
+
+def _multipart(fields: dict, file_field: str, filename: str, data: bytes) -> tuple[bytes, str]:
+    boundary = uuid.uuid4().hex
+    parts = []
+    for name, value in fields.items():
+        parts.append(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".encode()
+        )
+    parts.append(
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
+        f"filename=\"{filename}\"\r\nContent-Type: image/png\r\n\r\n".encode()
+        + data
+        + b"\r\n"
+    )
+    parts.append(f"--{boundary}--\r\n".encode())
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"

@@ -42,7 +42,8 @@ def _serve(with_scheduler: bool = False) -> None:
         try:
             for update in container.chat.poll(offset):
                 handle_update.run(
-                    container.store, container.brain, container.chat, container.clock, update
+                    container.store, container.brain, container.chat, container.clock, update,
+                    renderer=container.renderer,
                 )
                 offset = update.update_id + 1
         except KeyboardInterrupt:
