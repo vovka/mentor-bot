@@ -1,7 +1,8 @@
 # Mentor bot
 
-A Telegram bot that mentors your startup projects. It keeps a pinned cross-project plan, sends
-a morning brief with today's actions, and lets you change the plan by just talking to it.
+A personal Telegram mentor for anything you're working on: a business, a side project, a
+job hunt, home chores, a move, studies. It keeps one pinned plan across all of them, sends a
+morning brief with today's actions, and lets you change the plan by just talking to it.
 
 It runs the `codex` and `claude` CLIs on your existing **ChatGPT or Claude subscription**, so
 it needs no API keys. Python 3.12, standard library only.
@@ -20,11 +21,11 @@ flowchart LR
 | You say | Bot does |
 |---|---|
 | "what's due this week?" | answers from plans and timelines |
-| "move the demo to Friday" | replans with a heavier model, updates the pinned message |
+| "move the dentist to Friday" | replans with a heavier model, updates the pinned message |
 | "switch to gpt-6-astra high" | validates and changes model/effort |
 | "send a Gantt of the plan" | renders Mermaid to PNG and posts it |
-| "what's in the tusk repo?" | reads that project's repo, read-only |
-| "add project x at ~/dev/x" | creates `data/projects/x/` from the template |
+| "what's in the website repo?" | reads a project's linked folder or repo, read-only |
+| "add project renovation" | creates `data/projects/renovation/` from the template |
 
 While it works you see 👀 on your message and "typing…"; 🤔 means a heavy step is running.
 
@@ -43,11 +44,12 @@ Get the token from @BotFather. For the chat ID, message your bot and read `messa
 
 ## Projects
 
-A project is a folder. Copy `data/projects/_template/` and fill in:
+A project is anything with goals and dates: a product launch, a garden, taxes, a trip. Each one
+is a folder. Copy `data/projects/_template/` and fill in:
 
 ```
 data/projects/<name>/
-  project.md    what it is, "repo: /path/to/repo"
+  project.md    what it is, goals, optional "repo: /path/to/folder"
   timeline.md   events and deadlines
   plan.md       project-level plan
 data/plan.md    cross-project plan, rendered into the pinned message

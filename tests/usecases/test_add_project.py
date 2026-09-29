@@ -17,3 +17,15 @@ def test_existing_repo_path_is_added(tmp_path):
     out = add_project.run(FileStore(tmp_path), {"name": "x", "repo_path": str(repo)})
     assert "added" in out
     assert (tmp_path / "projects" / "x" / "project.md").exists()
+
+
+def test_project_without_repo_is_added(tmp_path):
+    template = tmp_path / "projects" / "_template"
+    template.mkdir(parents=True)
+    (template / "project.md").write_text("# <name>\nrepo: <path>\n")
+    store = FileStore(tmp_path)
+
+    out = add_project.run(store, {"name": "renovation"})
+
+    assert out == "Project 'renovation' added"
+    assert (tmp_path / "projects" / "renovation" / "project.md").exists()

@@ -49,7 +49,7 @@ and never send files of any other kind.
   flowchart, timeline, sequenceDiagram, pie, ...) and a one-line `caption`. Keep the reply
   short, e.g. "Here is the Gantt for the current plan."
 - `add_project`: the user asks to add a new project. Include `name` (lowercase slug,
-  `[a-z0-9_-]+`) and `repo_path`.
+  `[a-z0-9_-]+`) and `repo_path` only if they named a folder or repo, otherwise null.
 
 Only emit actions the user's message actually asked for. Most replies need no action at all.
 
