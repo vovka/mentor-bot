@@ -21,3 +21,16 @@ def test_replayed_update_id_is_deduped(tmp_path):
 
     handle_update.run(store, brain, chat, clock, update)
     assert chat.outbox == ["hi"]
+
+
+def test_blank_text_is_skipped_but_last_update_id_advances(tmp_path):
+    store = FileStore(tmp_path)
+    brain = FakeBrain([])  # would raise IndexError if handle_message were called
+    chat = FakeChat()
+    clock = FixedClock(datetime(2026, 9, 29, tzinfo=timezone.utc))
+    update = Update(update_id=9, chat_id=1, text="   \n\t", at=datetime.now(timezone.utc))
+
+    handle_update.run(store, brain, chat, clock, update)
+
+    assert chat.outbox == []
+    assert store.read_state()["last_update_id"] == 9

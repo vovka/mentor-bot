@@ -14,4 +14,6 @@
 
 ## Option C: Docker
 
-Not yet — see Phase 5 in docs/PLAN.md.
+    docker compose build
+    docker compose up -d
+    docker compose exec mentor mentor doctor

@@ -13,4 +13,7 @@ def run(store, brain, chat, clock, update: Update) -> None:
         state["last_update_id"] = update.update_id
         store.write_state(state)
 
+    if not update.text.strip():
+        return
+
     handle_message.run(store, brain, chat, clock, update.text)

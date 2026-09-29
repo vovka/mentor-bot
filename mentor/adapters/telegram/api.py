@@ -1,6 +1,7 @@
 """TelegramChat: Bot API adapter over stdlib urllib (send/edit/pin/poll)."""
 
 import json
+import os
 import urllib.request
 from datetime import datetime, timezone
 
@@ -14,7 +15,8 @@ _POLL_WAIT = 30
 
 class TelegramChat:
     def __init__(self, token: str, chat_id: str):
-        self._base = f"https://api.telegram.org/bot{token}"
+        base = os.environ.get("TELEGRAM_API_BASE", "https://api.telegram.org")
+        self._base = f"{base}/bot{token}"
         self._chat_id = str(chat_id)
 
     def _call(self, method: str, params: dict, timeout: float) -> dict:

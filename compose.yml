@@ -1,0 +1,10 @@
+services:
+  mentor:
+    build: .
+    env_file: .env
+    environment:
+      DATA_DIR: /data  # wins over .env inside the container
+    volumes:
+      - ./data:/data
+      - ~/.codex:/secrets/codex
+    restart: unless-stopped

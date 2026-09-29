@@ -13,7 +13,8 @@ from mentor.usecases import handle_update
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mentor")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("serve")
+    serve = sub.add_parser("serve")
+    serve.add_argument("--with-scheduler", action="store_true")
     job = sub.add_parser("job")
     job.add_argument("name", choices=["morning", "replan", "compact"])
     job.add_argument("--dry-run", action="store_true")
@@ -21,8 +22,21 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _serve() -> None:
+def _start_scheduler(container) -> None:
+    import threading
+
+    from mentor.adapters.scheduler.inprocess import Scheduler, load_schedule
+    from mentor.app import jobs
+
+    schedule = load_schedule(container.store.data_dir)
+    scheduler = Scheduler(container.clock, schedule, jobs.run)
+    threading.Thread(target=scheduler.run_forever, daemon=True).start()
+
+
+def _serve(with_scheduler: bool = False) -> None:
     container = build(Config.from_env())
+    if with_scheduler:
+        _start_scheduler(container)
     offset = container.store.read_state().get("last_update_id", 0) + 1
     while True:
         try:
@@ -61,7 +75,7 @@ def main() -> None:
     if args.command == "doctor":
         _doctor()
     elif args.command == "serve":
-        _serve()
+        _serve(with_scheduler=args.with_scheduler)
     elif args.command == "job":
         from mentor.app import jobs
 

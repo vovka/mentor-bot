@@ -7,7 +7,8 @@ from typing import Any
 
 from mentor.domain.settings import BrainSettings
 
-_SCHEMA_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "output_schema.json"
+# Relative to cwd, like the brain adapters' own schema_path (repo root in dev, /app in Docker).
+_SCHEMA_PATH = Path("prompts/output_schema.json")
 OUTPUT_SCHEMA: dict[str, Any] = json.loads(_SCHEMA_PATH.read_text())
 
 

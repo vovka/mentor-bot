@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from mentor.adapters.brain.claude_cli import ClaudeBrain
 from mentor.adapters.brain.codex_cli import CodexBrain
 from mentor.adapters.clock import SystemClock
 from mentor.adapters.store.files import FileStore
@@ -27,7 +28,9 @@ class Container:
 def brain_for(settings: BrainSettings) -> Brain:
     if settings.provider == "codex":
         return CodexBrain(_SCHEMA_PATH)
-    raise NotImplementedError(f"provider {settings.provider!r} not supported yet")
+    if settings.provider == "claude":
+        return ClaudeBrain(_SCHEMA_PATH)
+    raise ValueError(f"unknown provider {settings.provider!r}")
 
 
 def build(config: Config) -> Container:
