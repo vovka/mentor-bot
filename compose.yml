@@ -1,6 +1,7 @@
 services:
   mentor:
     build: .
+    user: "1000:1000"  # run as the host user so ~/.codex and ./data stay owned by you
     env_file: .env
     environment:
       DATA_DIR: /data  # wins over .env inside the container
