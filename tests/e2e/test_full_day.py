@@ -68,7 +68,10 @@ def test_full_day_scenario(tmp_path, monkeypatch):
     offset = _step(container, stub, offset, "use gpt-6-astra low", results)
     settings = container.store.read_settings()
     assert settings["model"] == "gpt-6-astra" and settings["effort"] == "low"
-    assert "Settings updated" in stub.calls[-1][1]["text"]
+    last_send = [c for c in stub.calls if c[0] == "sendMessage"][-1]
+    assert "Settings updated" in last_send[1]["text"]
+    methods = [c[0] for c in stub.calls]
+    assert "sendChatAction" in methods and methods[-1] == "setMessageReaction"
 
     # c. replan action -> plan.md updated, sendMessage + pinChatMessage on first run.
     calls_before = len(stub.calls)

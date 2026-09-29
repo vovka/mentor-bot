@@ -1,7 +1,8 @@
-"""TelegramChat: Bot API adapter over stdlib urllib (send/edit/pin/poll)."""
+"""TelegramChat: Bot API adapter over stdlib urllib (send/edit/pin/poll/react/typing)."""
 
 import json
 import os
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
@@ -51,6 +52,23 @@ class TelegramChat:
             _CALL_TIMEOUT,
         )
 
+    def react(self, message_id: int, emoji: str | None) -> None:
+        reaction = [{"type": "emoji", "emoji": emoji}] if emoji else []
+        self._call_quietly(
+            "setMessageReaction",
+            {"chat_id": self._chat_id, "message_id": message_id, "reaction": reaction},
+        )
+
+    def typing(self) -> None:
+        self._call_quietly("sendChatAction", {"chat_id": self._chat_id, "action": "typing"})
+
+    def _call_quietly(self, method: str, params: dict) -> None:
+        """Indicators are best-effort: a failure must never break the reply."""
+        try:
+            self._call(method, params, _CALL_TIMEOUT)
+        except (urllib.error.URLError, TimeoutError, KeyError):
+            pass
+
     def poll(self, offset: int) -> list[Update]:
         result = self._call(
             "getUpdates", {"timeout": _POLL_WAIT, "offset": offset}, _POLL_TIMEOUT
@@ -66,4 +84,5 @@ class TelegramChat:
             chat_id=message["chat"]["id"],
             text=message.get("text", ""),
             at=datetime.fromtimestamp(message["date"], tz=timezone.utc),
+            message_id=message["message_id"],
         )

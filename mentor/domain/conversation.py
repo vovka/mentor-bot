@@ -8,6 +8,7 @@ class Update:
     chat_id: int
     text: str
     at: datetime
+    message_id: int = 0
 
 
 @dataclass(frozen=True)

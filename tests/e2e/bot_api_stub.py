@@ -25,7 +25,7 @@ class BotApiStub:
         uid = self._next_update_id if update_id is None else update_id
         if update_id is None:
             self._next_update_id += 1
-        message = {"chat": {"id": self.chat_id}, "text": text, "date": int(time.time())}
+        message = {"chat": {"id": self.chat_id}, "text": text, "date": int(time.time()), "message_id": uid}
         self._updates.append({"update_id": uid, "message": message})
         return uid
 
@@ -45,7 +45,7 @@ class BotApiStub:
             return {"ok": True, "result": {"message_id": msg_id}}
         if method == "editMessageText":
             return {"ok": True, "result": {"message_id": payload.get("message_id")}}
-        if method == "pinChatMessage":
+        if method in ("pinChatMessage", "setMessageReaction", "sendChatAction"):
             return {"ok": True, "result": True}
         return {"ok": False, "error_code": 404, "description": f"unknown method {method}"}
 

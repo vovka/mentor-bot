@@ -16,4 +16,4 @@ def run(store, brain, chat, clock, update: Update) -> None:
     if not update.text.strip():
         return
 
-    handle_message.run(store, brain, chat, clock, update.text)
+    handle_message.run(store, brain, chat, clock, update.text, update.message_id)

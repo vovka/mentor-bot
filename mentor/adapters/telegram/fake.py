@@ -8,6 +8,8 @@ class FakeChat:
         self.outbox: list[str] = []
         self.edits: list[tuple[int, str]] = []
         self.pinned: list[int] = []
+        self.reactions: list[tuple[int, str | None]] = []
+        self.typing_calls = 0
         self._updates = list(updates or [])
         self._next_id = 1
 
@@ -27,3 +29,9 @@ class FakeChat:
         updates = [u for u in self._updates if u.update_id >= offset]
         self._updates = []
         return updates
+
+    def react(self, message_id: int, emoji: str | None) -> None:
+        self.reactions.append((message_id, emoji))
+
+    def typing(self) -> None:
+        self.typing_calls += 1

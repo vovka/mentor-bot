@@ -6,6 +6,7 @@ from pathlib import Path
 from mentor.domain.actions import BrainTask
 from mentor.domain.settings import ALLOWED, BrainSettings
 from mentor.usecases import add_project, change_settings
+from mentor.usecases.busy import busy
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "mentor.md"
 
@@ -50,21 +51,25 @@ def _build_task(store, clock, text: str) -> BrainTask:
     return BrainTask(prompt=prompt, cwd=str(store.data_dir), write=False, settings=brain_settings)
 
 
-def run(store, brain, chat, clock, text: str) -> str:
+_HEAVY = {"replan", "scout"}
+
+
+def run(store, brain, chat, clock, text: str, message_id: int = 0) -> str:
     store.append_history(f"user: {text}")
+    with busy(chat, message_id):
+        reply = _answer(store, brain, chat, clock, text, message_id)
+        store.append_history(f"bot: {reply}")
+        chat.send(reply)
+    return reply
 
-    task = _build_task(store, clock, text)
-    result = brain.run(task)
 
-    action_results = [
-        _DISPATCH[a.kind](store, brain, chat, clock, a.args)
-        for a in result.actions
-        if a.kind in _DISPATCH
-    ]
+def _answer(store, brain, chat, clock, text: str, message_id: int) -> str:
+    result = brain.run(_build_task(store, clock, text))
+    actions = [a for a in result.actions if a.kind in _DISPATCH]
+    if message_id and any(a.kind in _HEAVY for a in actions):
+        chat.react(message_id, "🤔")
+    action_results = [_DISPATCH[a.kind](store, brain, chat, clock, a.args) for a in actions]
     reply = result.reply
     if action_results:
         reply += "\n\n" + "\n".join(action_results)
-
-    store.append_history(f"bot: {reply}")
-    chat.send(reply)
     return reply
