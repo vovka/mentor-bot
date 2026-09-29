@@ -17,3 +17,15 @@
     docker compose build
     docker compose up -d
     docker compose exec mentor mentor doctor
+
+## Codex sandbox on Ubuntu 24.04
+
+Ubuntu blocks unprivileged user namespaces, so Codex's bubblewrap sandbox cannot start and
+shell commands inside `codex exec` fail. Grant the capability to bubblewrap only (safer than
+turning the global restriction off):
+
+    sudo cp deploy/apparmor-bwrap /etc/apparmor.d/bwrap
+    sudo apparmor_parser -r /etc/apparmor.d/bwrap
+
+Verify: `codex exec --ignore-user-config -s read-only -- "run: ls" </dev/null` no longer warns
+about bubblewrap. `loginctl enable-linger $USER` keeps the timers running without a login session.

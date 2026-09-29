@@ -1,0 +1,10 @@
+# Lets only bubblewrap create unprivileged user namespaces; the global
+# kernel.apparmor_restrict_unprivileged_userns=1 restriction stays on.
+# Install: sudo cp deploy/apparmor-bwrap /etc/apparmor.d/bwrap && sudo apparmor_parser -r /etc/apparmor.d/bwrap
+abi <abi/4.0>,
+include <tunables/global>
+
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+  include if exists <local/bwrap>
+}
