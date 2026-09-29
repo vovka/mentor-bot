@@ -12,7 +12,7 @@ flowchart LR
   BOT -- pinned plan --> You
   BOT --> P1[(tusk/)]
   BOT --> P2[(campaignloop/)]
-  BOT --> P3[("&lt;new project&gt;/")]
+  BOT --> P3[(new-project/)]
   BOT -. subscriptions, no API keys .-> CX[codex exec]
   BOT -. secondary .-> CL[claude -p]
 ```
@@ -158,7 +158,7 @@ flowchart LR
 ```mermaid
 flowchart LR
   subgraph data/projects
-    T[tusk/] ~~~ C[campaignloop/] ~~~ N["&lt;new&gt;/"]
+    T[tusk/] ~~~ C[campaignloop/] ~~~ N[new-project/]
   end
   T & C & N --> F["project.md (repo: line)<br/>timeline.md · plan.md"]
   F --> DISC[Store.projects discovers folders at run time]
