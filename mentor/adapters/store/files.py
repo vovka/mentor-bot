@@ -12,7 +12,7 @@ DEFAULT_SETTINGS = {
     "provider": "codex",
     "model": "gpt-5.5",
     "effort": "low",
-    "heavy": {"provider": "codex", "model": "gpt-6-luna", "effort": "high"},
+    "heavy": {"provider": "codex", "model": "gpt-6-astra", "effort": "high"},
 }
 
 

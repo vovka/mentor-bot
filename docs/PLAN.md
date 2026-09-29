@@ -54,9 +54,9 @@ Two design changes from the docs, driven by Codex facts found on this machine:
 - `Store: read/write plan(project?), read timeline(project?), settings, state, append_history,
   read_recent_history(days=2), projects(), add_project(name, repo_path)`.
 - `settings.json = {"provider":"codex","model":"gpt-5.5","effort":"low"}`; ALLOWED:
-  codex `gpt-5.5(low..xhigh) gpt-6-luna(low..max) gpt-6-sol gpt-6-astra(low..ultra)`;
+  codex `gpt-5.5(low..xhigh) gpt-6-astra(low..max) gpt-6-sol gpt-6-astra(low..ultra)`;
   claude `haiku sonnet opus fable claude-opus-5-5 (low..max)`. Heavy settings for replan
-  default `gpt-6-luna high`, overridable in `settings.json.heavy`.
+  default `gpt-6-astra high`, overridable in `settings.json.heavy`.
 - Sandbox map: chat → `-s read-only` / `--allowedTools Read,Grep`; replan, compact →
   `-s workspace-write -C data/` / `Read,Edit,Write,Grep --permission-mode acceptEdits`;
   scout → read-only over `project.repo_path`.
@@ -88,7 +88,7 @@ in `state.json` under the lock, deploy/crontab + systemd units, inprocess schedu
 Check: `mentor job morning --dry-run`; `systemctl --user list-timers` shows three.
 
 **4. E2E tier 1.** `tests/e2e/`: `http.server` Bot API stub + fake brain, one scenario:
-message→reply; "use gpt-6-luna low"→settings; "move demo to Friday"→replan action→plan.md diff→
+message→reply; "use gpt-6-astra low"→settings; "move demo to Friday"→replan action→plan.md diff→
 `editMessageText`/`pinChatMessage`; replayed update_id→zero calls; `job morning`→one send;
 `job compact` with 20 fixture days→summary.md, day files kept.
 
@@ -97,7 +97,7 @@ message→reply; "use gpt-6-luna low"→settings; "move demo to Friday"→replan
 Check: `docker compose up`; `mentor doctor` inside passes.
 
 **6. E2E tier 2, live smoke.** `scripts/live_smoke.sh` + Claude in Chrome on web.telegram.org
-acting as the user, ≤6 model calls: due-this-week; switch to gpt-6-luna low; switch to claude
+acting as the user, ≤6 model calls: due-this-week; switch to gpt-6-astra low; switch to claude
 (skipped if no token); move an item→pin edited; `job morning`; add project jobpilot. Screenshot
 each step to `tests/e2e/evidence/<date>/`, send to user.
 

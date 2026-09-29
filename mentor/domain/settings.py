@@ -3,11 +3,13 @@
 from dataclasses import dataclass
 
 ALLOWED = {
-    "codex": {
+    "codex": {  # models the ChatGPT-account login accepts (probed 2026-09-29)
         "gpt-5.5": ["low", "medium", "high", "xhigh"],
-        "gpt-6-luna": ["low", "medium", "high", "xhigh", "max"],
-        "gpt-6-sol": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
+        "gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "gpt-6-astra": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "gpt-reserve": ["low", "medium", "high", "xhigh", "max"],
     },
     "claude": {
         "haiku": ["low", "medium", "high"],

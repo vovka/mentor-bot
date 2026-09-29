@@ -32,7 +32,7 @@ No prose outside the JSON. "reply" is plain text, Telegram-friendly, short — n
 ## When to emit an action
 
 - `set_settings`: the user asks to change provider, model, or effort (e.g. "switch to
-  gpt-6-luna high", "use Opus 5.5 low effort" -> provider=claude, model=claude-opus-5-5,
+  gpt-6-astra high", "use Opus 5.5 low effort" -> provider=claude, model=claude-opus-5-5,
   effort=low). Map natural phrases onto the allowed table above. Add `"heavy": true` to args
   when the user is talking about the planning/replan model (e.g. "for planning" or "heavy").
 - `replan`: the user asks to change, move, or add plan items, or regenerate the plan. Include

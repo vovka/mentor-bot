@@ -18,17 +18,17 @@ def test_set_settings_action_updates_settings_and_confirms(tmp_path):
         [
             BrainResult(
                 reply="switching model",
-                actions=[Action(kind="set_settings", args={"model": "gpt-6-luna"})],
+                actions=[Action(kind="set_settings", args={"model": "gpt-6-astra"})],
                 raw={},
             )
         ]
     )
     chat = FakeChat()
 
-    reply = handle_message.run(store, brain, chat, _CLOCK, "use gpt-6-luna")
+    reply = handle_message.run(store, brain, chat, _CLOCK, "use gpt-6-astra")
 
-    assert store.read_settings()["model"] == "gpt-6-luna"
-    assert "gpt-6-luna" in reply
+    assert store.read_settings()["model"] == "gpt-6-astra"
+    assert "gpt-6-astra" in reply
     assert chat.outbox == [reply]
 
 
