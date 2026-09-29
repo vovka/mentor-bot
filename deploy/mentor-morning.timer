@@ -1,0 +1,9 @@
+[Unit]
+Description=Mentor bot: morning brief timer
+
+[Timer]
+OnCalendar=*-*-* 08:00 Europe/Kyiv
+Persistent=true
+
+[Install]
+WantedBy=timers.target

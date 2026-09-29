@@ -1,0 +1,13 @@
+[Unit]
+Description=Mentor bot long-poll service
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dev/mentor-bot
+EnvironmentFile=%h/dev/mentor-bot/.env
+ExecStart=%h/dev/mentor-bot/.venv/bin/mentor serve
+Restart=always
+
+[Install]
+WantedBy=default.target

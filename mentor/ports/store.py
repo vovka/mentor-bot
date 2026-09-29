@@ -1,4 +1,5 @@
 from datetime import date
+from pathlib import Path
 from typing import Any, Protocol
 
 from mentor.domain.project import Project
@@ -6,6 +7,8 @@ from mentor.domain.settings import BrainSettings
 
 
 class Store(Protocol):
+    data_dir: Path
+
     def read_plan(self, project: str | None = None) -> str: ...
 
     def write_plan(self, text: str, project: str | None = None) -> None: ...
@@ -15,6 +18,8 @@ class Store(Protocol):
     def read_settings(self) -> dict[str, Any]: ...
 
     def write_settings(self, settings: BrainSettings) -> None: ...
+
+    def write_heavy_settings(self, settings: BrainSettings) -> None: ...
 
     def read_state(self) -> dict[str, Any]: ...
 

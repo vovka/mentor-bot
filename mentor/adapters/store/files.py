@@ -53,6 +53,15 @@ class FileStore:
         current.update(provider=settings.provider, model=settings.model, effort=settings.effort)
         (self.data_dir / "settings.json").write_text(json.dumps(current, indent=2))
 
+    def write_heavy_settings(self, settings: BrainSettings) -> None:
+        current = self.read_settings()
+        current["heavy"] = {
+            "provider": settings.provider,
+            "model": settings.model,
+            "effort": settings.effort,
+        }
+        (self.data_dir / "settings.json").write_text(json.dumps(current, indent=2))
+
     def read_state(self) -> dict:
         path = self.data_dir / "state.json"
         if not path.exists():
