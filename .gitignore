@@ -1,0 +1,7 @@
+.env
+data/history/*
+!data/history/.gitkeep
+data/state.json
+__pycache__/
+*.pyc
+.venv/

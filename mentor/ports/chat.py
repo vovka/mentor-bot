@@ -1,0 +1,13 @@
+from typing import Protocol
+
+from mentor.domain.conversation import Update
+
+
+class Chat(Protocol):
+    def send(self, text: str) -> int: ...
+
+    def edit(self, id: int, text: str) -> None: ...
+
+    def pin(self, id: int) -> None: ...
+
+    def poll(self, offset: int) -> list[Update]: ...
