@@ -1,6 +1,6 @@
 # Mentor bot — architecture
 
-Status 2026-09-29: built, 41 tests, live-tested, running as a systemd user service.
+Status 2026-09-29: built, 47 tests, live-tested, running as a systemd user service.
 Published page with the same diagrams: https://claude.ai/artifact/Kz2GVi8aQ5SpxxtQVg1HFD
 
 ## 1. What it is
@@ -47,9 +47,10 @@ flowchart TB
     BR[brain/ codex_cli · claude_cli · fake]
     STO[store/ files · lock]
     SCH[scheduler/ inprocess]
+    RND[render/ kroki · fake]
   end
   subgraph ports["ports/ — Protocols"]
-    PC[Chat] --- PB[Brain] --- PS[Store] --- PK[Clock]
+    PC[Chat] --- PB[Brain] --- PS[Store] --- PK[Clock] --- PR[Renderer]
   end
   subgraph usecases["usecases/ — one file per verb"]
     U1[handle_update] --> U2[handle_message]
@@ -106,12 +107,16 @@ flowchart TB
   OUT -- scout --> S["scout.run · read-only over project repo_path"]
   OUT -- set_settings --> V{"change_settings.run<br/>valid vs ALLOWED?"}
   OUT -- add_project --> A{"add_project.run<br/>slug ok · repo_path exists?"}
+  OUT -- send_image --> I["send_image.run<br/>Mermaid → Kroki PNG → sendPhoto"]
   V -- yes --> W1[settings.json]
   V -- no --> R1[reply: allowed list]
   A -- yes --> W2["data/projects/&lt;name&gt;/ from _template"]
   A -- no --> R2[reply: rejected]
-  P & S & W1 & W2 --> RES[folded into reply]
+  P & S & W1 & W2 & I --> RES[folded into reply]
 ```
+
+Images: the brain never renders. It emits `send_image{diagram, caption}`; the use case posts the
+PNG from Kroki (`KROKI_URL`, default kroki.io, self-hostable) and a failure lands in the reply text.
 
 ### Who writes files
 
@@ -217,11 +222,11 @@ flowchart TB
 ```
 mentor/
   domain/      settings.py actions.py project.py conversation.py
-  usecases/    handle_update.py handle_message.py morning_brief.py replan.py
-               scout.py compact.py change_settings.py add_project.py
-  ports/       chat.py brain.py store.py clock.py
+  usecases/    handle_update.py handle_message.py busy.py morning_brief.py replan.py
+               scout.py compact.py change_settings.py add_project.py send_image.py
+  ports/       chat.py brain.py store.py clock.py renderer.py
   adapters/    telegram/{api,markdown,fake}.py  brain/{codex_cli,claude_cli,fake}.py
-               store/{files,lock}.py  scheduler/inprocess.py
+               store/{files,lock}.py  scheduler/inprocess.py  render/{kroki,fake}.py
   app/         config.py container.py cli.py jobs.py
 data/          plan.md settings.json state.json history/ projects/{_template,<name>}/
 prompts/       mentor.md replan.md scout.md morning.md compact.md output_schema.json
@@ -242,7 +247,7 @@ tests/         unit/ usecases/ e2e/     scripts/live_smoke.sh     Dockerfile com
 
 ```mermaid
 flowchart LR
-  ENV[".env (gitignored, 600)<br/>TELEGRAM_BOT_TOKEN · TELEGRAM_CHAT_ID · DATA_DIR · TZ"] --> CFG[app/config.py]
+  ENV[".env (gitignored, 600)<br/>TELEGRAM_BOT_TOKEN · TELEGRAM_CHAT_ID · DATA_DIR · TZ · KROKI_URL"] --> CFG[app/config.py]
   OAUTH["CLAUDE_CODE_OAUTH_TOKEN (optional)"] --> CFG
   CODEX["~/.codex/auth.json"] --> CX[codex exec]
   CFG --> CT[container.py]
