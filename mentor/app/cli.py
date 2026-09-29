@@ -43,10 +43,11 @@ def _doctor() -> None:
     container.chat.send("doctor: ok")
     result = subprocess.run(
         [
-            "codex", "exec", "-s", "read-only", "-c", "model_provider=openai",
+            "codex", "exec", "-s", "read-only", "--ignore-user-config",
             "-m", "gpt-5.5", "-c", "model_reasoning_effort=low",
             "--skip-git-repo-check", "--", "reply with exactly: ok",
         ],
+        stdin=subprocess.DEVNULL,  # codex exec blocks on an open stdin
         capture_output=True,
         text=True,
         timeout=180,

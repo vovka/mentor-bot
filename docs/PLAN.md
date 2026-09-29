@@ -22,7 +22,7 @@ Two design changes from the docs, driven by Codex facts found on this machine:
    calls get `workspace-write` over `data/`. Model switching is validated by code, never by the
    agent editing `settings.json`.
 2. `~/.codex/config.toml` sets `model_provider="headroom"` (local proxy 127.0.0.1:8787) →
-   every codex call passes `-c model_provider=openai` plus a subprocess timeout.
+   every codex call passes `--ignore-user-config` (auth.json still applies; MCP servers in the user config hang headless) plus a subprocess timeout.
 
 ## File tree (≤100 lines per file)
 
@@ -62,7 +62,7 @@ Two design changes from the docs, driven by Codex facts found on this machine:
   scout → read-only over `project.repo_path`.
 
 Codex: `codex exec -o OUT.json -m M -c model_reasoning_effort=E -s SANDBOX -C CWD
---skip-git-repo-check -c approval_policy=never -c model_provider=openai
+--skip-git-repo-check -c approval_policy=never --ignore-user-config
 --output-schema prompts/output_schema.json -- PROMPT`; parse `json.load(OUT)`; timeout 180 s.
 Claude: `claude -p PROMPT --model M --effort E --output-format json --json-schema "$(cat …)"
 --allowedTools … --permission-prompts none --add-dir CWD`; parse `structured_output`; never `--bare`.

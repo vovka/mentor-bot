@@ -25,7 +25,7 @@ class CodexBrain:
 
     def _run(self, task: BrainTask, out_path: Path) -> BrainResult:
         cmd = self._build_cmd(task, out_path)
-        stdin_text = None
+        stdin_text = ""  # codex exec blocks on an open stdin, so always close it
         if len(task.prompt.encode()) > _STDIN_THRESHOLD:
             stdin_text = task.prompt
         else:
@@ -53,8 +53,7 @@ class CodexBrain:
             "--skip-git-repo-check",
             "-c",
             "approval_policy=never",
-            "-c",
-            "model_provider=openai",
+            "--ignore-user-config",  # user config points at a local proxy + MCP servers that hang headless
             "--output-schema",
             self._schema_path,
         ]

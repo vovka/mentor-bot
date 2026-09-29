@@ -27,7 +27,7 @@ def test_run_parses_structured_output(tmp_path, monkeypatch):
     assert result.reply == "hi"
     assert result.actions[0].kind == "scout"
     cmd = captured["cmd"]
-    assert "-c" in cmd and "model_provider=openai" in cmd
+    assert "--ignore-user-config" in cmd
     assert "-s" in cmd and "read-only" in cmd
     assert "--output-schema" in cmd
     assert cmd[-2:] == ["--", "hello"]
