@@ -1,8 +1,8 @@
-"""handle_update use case: dedup Telegram updates by update_id, then handle the message."""
+"""handle_update use case: dedup Telegram updates by update_id, then route a button press or a message."""
 
 from mentor.adapters.store.lock import locked
 from mentor.domain.conversation import Update
-from mentor.usecases import handle_message
+from mentor.usecases import checkin, handle_message
 
 
 def run(store, brain, chat, clock, update: Update, renderer=None) -> None:
@@ -13,7 +13,11 @@ def run(store, brain, chat, clock, update: Update, renderer=None) -> None:
         state["last_update_id"] = update.update_id
         store.write_state(state)
 
+    if update.callback_data:
+        checkin.on_button(store, brain, chat, clock, update)
+        return
     if not update.text.strip():
         return
 
     handle_message.run(store, brain, chat, clock, update.text, update.message_id, renderer)
+    checkin.after_message(store, brain, chat, clock)

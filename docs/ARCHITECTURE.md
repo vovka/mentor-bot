@@ -1,6 +1,6 @@
 # Mentor bot — architecture
 
-Status 2026-09-29: built, 47 tests, live-tested, running as a systemd user service.
+Status 2026-09-30: built, 57 tests, live-tested, running as a systemd user service.
 Published page with the same diagrams: https://claude.ai/artifact/Kz2GVi8aQ5SpxxtQVg1HFD
 
 ## 1. What it is
@@ -55,7 +55,7 @@ flowchart TB
   subgraph usecases["usecases/ — one file per verb"]
     U1[handle_update] --> U2[handle_message]
     U2 --> U4[replan · scout · change_settings · add_project]
-    U3[morning_brief · compact]
+    U3[morning_checkin · reconcile · checkin · morning_brief · compact]
   end
   subgraph domain["domain/ — no I/O"]
     D[Project · Action · BrainTask · BrainResult · BrainSettings · Update]
@@ -180,9 +180,9 @@ flowchart LR
 ```mermaid
 flowchart LR
   CR[cron · deploy/crontab] --> J
-  SD["systemd user timers ← running now<br/>mentor-{morning,replan,compact}.timer"] --> J
+  SD["systemd user timers ← running now<br/>mentor-{morning,deadline,replan,compact}.timer"] --> J
   IP["in-process thread<br/>mentor serve --with-scheduler"] --> J
-  J["mentor job morning | replan | compact"] --> L[flock data/.lock]
+  J["mentor job morning | deadline | replan | compact"] --> L[flock data/.lock]
   L --> ID{done today?<br/>state.json}
   ID -- yes --> NO[no-op]
   ID -- no --> RUN[use case] --> MARK[mark state.json]
@@ -190,9 +190,30 @@ flowchart LR
 
 | Job | When (Europe/Kyiv) | Brain |
 |---|---|---|
-| morning brief | daily 08:00 | chat settings |
+| morning check-in → brief | daily 08:00 | chat; heavy if reconciling |
+| check-in deadline | daily 09:00 | heavy (reconcile) if still pending |
 | replan | Sunday 20:00 | heavy settings |
 | compact | Sunday 21:00 | chat settings |
+
+### Morning check-in
+
+```mermaid
+flowchart TB
+  M["08:00 morning_checkin"] --> W{user wrote since<br/>last brief?}
+  W -- yes --> R
+  W -- no --> Q["'No updates… not done?' [Yes] [No]<br/>checkin.stage = asked"]
+  Q -- Yes --> R
+  Q -- No --> AW["'send updates by 09:00'<br/>stage = awaiting_updates"]
+  AW -- chat message --> R
+  Q & AW -- "09:00 deadline job" --> R
+  R["reconcile · heavy brain<br/>prompts/reconcile.md"] -- "document null" --> B[morning brief]
+  R -- document --> P["proposal [Approve] [Reject]<br/>stage = proposed · plan.md untouched"]
+  P -- Approve --> AP["write plan.md · edit pin"] --> B
+  P -- Reject --> RJ["'What should I change instead?'<br/>next message → normal chat"]
+```
+
+State lives in `state.json` `checkin`; each transition is claimed under `data/.lock`, so a button
+and the 09:00 job never both act. A press on a stale stage or old message → "Already handled."
 
 ## 8. Memory
 
@@ -224,12 +245,13 @@ mentor/
   domain/      settings.py actions.py project.py conversation.py
   usecases/    handle_update.py handle_message.py busy.py morning_brief.py replan.py
                scout.py compact.py change_settings.py add_project.py send_image.py
+               morning_checkin.py checkin.py checkin_state.py reconcile.py
   ports/       chat.py brain.py store.py clock.py renderer.py
   adapters/    telegram/{api,markdown,fake}.py  brain/{codex_cli,claude_cli,fake}.py
                store/{files,lock}.py  scheduler/inprocess.py  render/{kroki,fake}.py
   app/         config.py container.py cli.py jobs.py
 data/          plan.md settings.json state.json history/ projects/{_template,<name>}/
-prompts/       mentor.md replan.md scout.md morning.md compact.md output_schema.json
+prompts/       mentor.md replan.md reconcile.md scout.md morning.md compact.md output_schema.json
 deploy/        crontab mentor.service mentor-*.{service,timer} apparmor-bwrap README.md
 tests/         unit/ usecases/ e2e/     scripts/live_smoke.sh     Dockerfile compose.yml
 ```
@@ -258,7 +280,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  subgraph "tests/ · 41 · no network"
+  subgraph "tests/ · 57 · no network"
     U[unit: settings · store · markdown] --> UC[usecases: fake brain + fake chat]
     UC --> E2E["e2e: Bot API stub (http.server) + fake brain<br/>full day: chat → settings → replan → morning → compact"]
   end

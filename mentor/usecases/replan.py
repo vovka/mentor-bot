@@ -26,14 +26,18 @@ def run(store, brain, chat, clock, reason: str) -> str:
     else:
         summary = "plan.md unchanged (brain returned no document). " + summary
 
+    sync_pinned(store, chat, last_replan=today.isoformat())
+    return summary
+
+
+def sync_pinned(store, chat, **marks) -> None:
+    """Push plan.md into the pinned message; `marks` are extra state keys set in the same lock."""
     pinned = _render_pinned(store.read_plan())
     with locked(store.data_dir):
         state = store.read_state()
         _sync_pin(chat, state, pinned)
-        state["last_replan"] = today.isoformat()
+        state.update(marks)
         store.write_state(state)
-
-    return summary
 
 
 def _build_prompt(store, today, reason: str) -> str:

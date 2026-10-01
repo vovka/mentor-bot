@@ -1,6 +1,7 @@
 """Fake Telegram Bot API for no-network e2e tests: an http.server on 127.0.0.1:<free port>,
 run in a background thread. Endpoints: getUpdates, sendMessage, editMessageText,
-pinChatMessage, getMe. Every call is recorded as (method, payload) in `.calls`.
+pinChatMessage, answerCallbackQuery,
+editMessageReplyMarkup, getMe. Every call is recorded as (method, payload) in `.calls`.
 """
 
 import json
@@ -29,6 +30,13 @@ class BotApiStub:
         self._updates.append({"update_id": uid, "message": message})
         return uid
 
+    def enqueue_callback(self, data: str, message_id: int, chat_id: int | None = None) -> int:
+        uid = self._next_update_id
+        self._next_update_id += 1
+        message = {"chat": {"id": chat_id or self.chat_id}, "date": int(time.time()), "message_id": message_id}
+        self._updates.append({"update_id": uid, "callback_query": {"id": f"cb{uid}", "data": data, "message": message}})
+        return uid
+
     def stop(self) -> None:
         self._server.shutdown()
 
@@ -45,7 +53,10 @@ class BotApiStub:
             return {"ok": True, "result": {"message_id": msg_id}}
         if method == "editMessageText":
             return {"ok": True, "result": {"message_id": payload.get("message_id")}}
-        if method in ("pinChatMessage", "setMessageReaction", "sendChatAction"):
+        if method in (
+            "pinChatMessage", "setMessageReaction", "sendChatAction",
+            "answerCallbackQuery", "editMessageReplyMarkup",
+        ):
             return {"ok": True, "result": True}
         return {"ok": False, "error_code": 404, "description": f"unknown method {method}"}
 

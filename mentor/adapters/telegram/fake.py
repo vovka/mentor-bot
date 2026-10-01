@@ -11,14 +11,25 @@ class FakeChat:
         self.reactions: list[tuple[int, str | None]] = []
         self.photos: list[tuple[bytes, str]] = []
         self.typing_calls = 0
+        self.buttons: dict[int, list[tuple[str, str]]] = {}
+        self.answered: list[str] = []
+        self.cleared: list[int] = []
         self._updates = list(updates or [])
         self._next_id = 1
 
-    def send(self, text: str) -> int:
+    def send(self, text: str, buttons: list[tuple[str, str]] | None = None) -> int:
         self.outbox.append(text)
         msg_id = self._next_id
         self._next_id += 1
+        if buttons:
+            self.buttons[msg_id] = buttons
         return msg_id
+
+    def answer_callback(self, callback_id: str) -> None:
+        self.answered.append(callback_id)
+
+    def clear_buttons(self, message_id: int) -> None:
+        self.cleared.append(message_id)
 
     def send_photo(self, png: bytes, caption: str) -> int:
         self.photos.append((png, caption))

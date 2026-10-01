@@ -9,6 +9,8 @@ class Update:
     text: str
     at: datetime
     message_id: int = 0
+    callback_data: str = ""
+    callback_id: str = ""
 
 
 @dataclass(frozen=True)

@@ -25,6 +25,7 @@ flowchart LR
 | "switch to gpt-6-astra high" | validates and changes model/effort |
 | "send a Gantt of the plan" | renders Mermaid to PNG and posts it |
 | "what's in the website repo?" | reads a project's linked folder or repo, read-only |
+| (silent since yesterday, 08:00) | asks Yes/No, proposes moves for undone tasks, writes plan.md on Approve |
 | "add project renovation" | creates `data/projects/renovation/` from the template |
 
 While it works you see 👀 on your message and "typing…"; 🤔 means a heavy step is running.
@@ -59,7 +60,8 @@ data/plan.md    cross-project plan, rendered into the pinned message
 ## Scheduled jobs
 
 ```bash
-mentor job morning   # daily brief (idempotent per day)
+mentor job morning   # 08:00 check-in, then the daily brief (idempotent per day)
+mentor job deadline  # 09:00: no answer to the check-in -> reconcile the plan
 mentor job replan    # weekly replan
 mentor job compact   # fold old chat history into summary.md
 ```

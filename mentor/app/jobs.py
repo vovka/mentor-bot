@@ -1,6 +1,6 @@
 """Entry point for `mentor job <name>`: builds a container and dispatches to a use case.
 
-Call site: `mentor job morning|replan|compact [--dry-run]` in mentor/app/cli.py calls
+Call site: `mentor job morning|deadline|replan|compact [--dry-run]` in mentor/app/cli.py calls
 `from mentor.app import jobs; jobs.run(name, dry_run)`.
 """
 
@@ -45,11 +45,15 @@ def _fallback_container() -> _Container:
 
 
 def run(name: str, dry_run: bool = False) -> str:
-    from mentor.usecases import compact, morning_brief, replan
+    from mentor.usecases import compact, morning_brief, morning_checkin, replan
 
     c = _build_container()
+    if name == "morning" and dry_run:
+        return morning_brief.run(c.store, c.brain, c.chat, c.clock, dry_run=True)
     if name == "morning":
-        return morning_brief.run(c.store, c.brain, c.chat, c.clock, dry_run=dry_run)
+        return morning_checkin.morning(c.store, c.brain, c.chat, c.clock)
+    if name == "deadline":
+        return morning_checkin.deadline(c.store, c.brain, c.chat, c.clock)
     if name == "replan":
         return replan.run(c.store, c.brain, c.chat, c.clock, reason="scheduled")
     if name == "compact":

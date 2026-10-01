@@ -4,7 +4,12 @@ from mentor.domain.conversation import Update
 
 
 class Chat(Protocol):
-    def send(self, text: str) -> int: ...
+    def send(self, text: str, buttons: list[tuple[str, str]] | None = None) -> int:
+        """Send text; buttons = [(label, callback_data)] become one inline keyboard row."""
+
+    def answer_callback(self, callback_id: str) -> None: ...
+
+    def clear_buttons(self, message_id: int) -> None: ...
 
     def send_photo(self, png: bytes, caption: str) -> int: ...
 

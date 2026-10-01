@@ -6,11 +6,11 @@
 
 ## Option B: systemd --user
 
-    cp deploy/mentor.service deploy/mentor-{morning,replan,compact}.{service,timer} \
+    cp deploy/mentor.service deploy/mentor-{morning,deadline,replan,compact}.{service,timer} \
       ~/.config/systemd/user/
     systemctl --user daemon-reload
     systemctl --user enable --now mentor.service \
-      mentor-morning.timer mentor-replan.timer mentor-compact.timer
+      mentor-morning.timer mentor-deadline.timer mentor-replan.timer mentor-compact.timer
 
 ## Option C: Docker
 

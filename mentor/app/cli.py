@@ -1,4 +1,4 @@
-"""mentor CLI: serve | job {morning,replan,compact} | doctor."""
+"""mentor CLI: serve | job {morning,deadline,replan,compact} | doctor."""
 
 import argparse
 import subprocess
@@ -16,7 +16,7 @@ def _build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve")
     serve.add_argument("--with-scheduler", action="store_true")
     job = sub.add_parser("job")
-    job.add_argument("name", choices=["morning", "replan", "compact"])
+    job.add_argument("name", choices=["morning", "deadline", "replan", "compact"])
     job.add_argument("--dry-run", action="store_true")
     sub.add_parser("doctor")
     return parser
