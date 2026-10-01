@@ -12,6 +12,22 @@
     systemctl --user enable --now mentor.service \
       mentor-morning.timer mentor-deadline.timer mentor-replan.timer mentor-compact.timer mentor-work.timer
 
+`mentor-work.timer` runs `mentor job work` hourly as a safety net. The bot also starts the worker
+itself after button presses, `work` and `task_update` chat actions, replan and the morning job;
+only one worker runs at a time (`data/.work.lock`), and a second start exits at once.
+
+Worker logs: a worker started by the bot writes to `data/work.log`; a run from the timer goes to
+the journal (`journalctl --user -u mentor-work`); cron appends to `data/jobs.log`.
+
+### PATH for `npx` (browser access)
+
+With `BROWSER_CDP_URL` set, the worker starts the Playwright MCP server through `npx`. A systemd
+user service does not get the nvm bin directory, so `npx` is not found. Set `PATH` in `.env`
+(for example `PATH=/home/you/.nvm/versions/node/<version>/bin:/usr/local/bin:/usr/bin:/bin`) or
+with `Environment=PATH=...` in `mentor.service` and `mentor-work.service`. The bot's own
+`mentor.service` needs it too, because workers it kicks inherit its environment. Chrome must be
+running with remote debugging on the port in `BROWSER_CDP_URL`.
+
 ## Option C: Docker
 
     docker compose build

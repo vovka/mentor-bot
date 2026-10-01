@@ -2,6 +2,7 @@
 
 from mentor.adapters.store.lock import locked
 from mentor.domain import tasks
+from mentor.domain.actions import BrainResult
 from mentor.domain.settings import work_limits
 from mentor.usecases import apply_plan, work_brain, work_result
 
@@ -66,12 +67,17 @@ def _park(store, chat, task) -> str:
 
 
 def _work(store, brain, chat, clock, mail, task) -> str:
-    brain_task = work_brain.build(store, clock, task, store.read_tasks())
-    result = brain.run(brain_task)
+    try:
+        result = brain.run(work_brain.build(store, clock, task, store.read_tasks()))
+    except OSError as error:  # e.g. the CLI is missing: fail the task rather than retry it on every run
+        result = BrainResult(reply=f"brain error: {error}", actions=[], raw={})
     args = work_result.outcome_of(result)
     updated = work_result.apply(store, task.id, args)
     if updated is None:
         return f"- dropped meanwhile: {task.title}"
     wdir = work_brain.work_dir(store, task)
-    work_result.notify(store, chat, mail, updated, args, result.reply, wdir, work_brain.repo_of(store, task))
+    try:
+        work_result.notify(store, chat, mail, updated, args, result.reply, wdir, work_brain.repo_of(store, task))
+    except OSError as error:  # Telegram hiccup: the outcome is stored, keep the loop going
+        print(f"work: could not report {task.id}: {error}")
     return f"- {args['outcome'].replace('_', ' ')}: {task.title}"

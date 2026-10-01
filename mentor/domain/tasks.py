@@ -1,12 +1,14 @@
 """Task graph: pure parsing, validation, merging and rendering."""
 
 import json
+import re
 from dataclasses import asdict, dataclass, field, fields
 from graphlib import CycleError, TopologicalSorter
 
 KINDS = ("research", "writing", "coding", "system", "user")
 STATUSES = ("todo", "running", "awaiting_approval", "awaiting_user", "done", "failed", "dropped")
 RUNTIME = ("files", "approved", "provider", "proposal")
+_ID = re.compile(r"[A-Za-z0-9_-]{1,48}")  # ids travel in Telegram callback data (64 bytes, `:`-separated)
 
 
 @dataclass
@@ -49,6 +51,8 @@ def _validate(tasks: list[Task]) -> None:
     if len(set(ids)) != len(ids):
         raise ValueError("duplicate task id")
     for t in tasks:
+        if not _ID.fullmatch(t.id):
+            raise ValueError(f"task id {t.id!r}: use up to 48 letters, digits, '-' or '_'")
         if t.kind not in KINDS or t.status not in STATUSES:
             raise ValueError(f"task {t.id}: unknown kind or status")
         for dep in t.deps:
@@ -73,18 +77,19 @@ def next_ready(tasks: list[Task]) -> Task | None:
 
 
 def merge(old: list[Task], new: list[Task]) -> list[Task]:
-    """Take `new`'s content; keep runtime fields and status from `old`."""
+    """Take `new`'s content; runtime fields and status come from `old`, never from the planner."""
     olds = {t.id: t for t in old}
     for t in new:
         prev = olds.get(t.id)
-        if prev is None:
-            continue
+        source = prev or Task(t.id, t.title)  # a new task starts unapproved, with no files or proposal
         for name in RUNTIME:
-            setattr(t, name, getattr(prev, name))
+            setattr(t, name, getattr(source, name))
         if t.status not in ("done", "dropped"):
-            t.status = prev.status
+            t.status = prev.status if prev else "todo"
     new_ids = {t.id for t in new}
     flying = [t for t in old if t.status == "running" and t.id not in new_ids]
+    for t in flying:
+        t.deps = [d for d in t.deps if d in new_ids]  # its other deps left with the old plan
     return flying + new
 
 

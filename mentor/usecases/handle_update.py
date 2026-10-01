@@ -18,6 +18,7 @@ def run(store, brain, chat, clock, update: Update, renderer=None, kick=lambda: N
         return
     if update.callback_data:
         checkin.on_button(store, brain, chat, clock, update)
+        kick()  # an approved plan may have made tasks ready
         return
     if not update.text.strip():
         return

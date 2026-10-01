@@ -146,3 +146,36 @@ def test_new_proposal_clears_the_old_approval(tmp_path):
     work.run(store, brain, chat, _CLOCK)
     task = store.read_tasks()[0]
     assert (task.approved, task.proposal, task.status) == (False, "new", "awaiting_approval")
+
+
+def test_approval_is_consumed_by_the_run(tmp_path):
+    store, brain, chat = _setup(tmp_path, Task("a", "Setup", approved=True, proposal="p"), results=[_result("failed")])
+    work.run(store, brain, chat, _CLOCK)
+    assert "APPROVED" in brain.tasks[0].prompt and store.read_tasks()[0].approved is False
+
+
+def test_result_for_a_task_dropped_meanwhile_is_discarded(tmp_path):
+    store, _, chat = _setup(tmp_path, Task("a", "Research"))
+
+    class DroppingBrain:
+        def run(self, task):
+            store.write_tasks([Task("a", "Research", status="dropped")])
+            return _result("done")
+
+    work.run(store, DroppingBrain(), chat, _CLOCK)
+    assert _status(store) == {"a": "dropped"} and not any(m.startswith("Done: Research") for m in chat.outbox)
+
+
+def test_missing_cli_fails_the_task_and_dotfiles_are_not_sent(tmp_path):
+    class BrokenBrain:
+        def run(self, task):
+            raise FileNotFoundError("codex")
+
+    store, brain, chat = _setup(tmp_path, Task("a", "A"), Task("b", "B"), results=[_result("done", files=[".env"])])
+    (tmp_path / "work" / "b").mkdir(parents=True)
+    (tmp_path / "work" / "b" / ".env").write_text("SECRET")
+    work.run(store, BrokenBrain(), chat, _CLOCK)
+    assert _status(store) == {"a": "failed", "b": "failed"}
+    store.write_tasks([Task("b", "B")])
+    work.run(store, brain, chat, _CLOCK)
+    assert _status(store) == {"b": "done"} and chat.documents == []

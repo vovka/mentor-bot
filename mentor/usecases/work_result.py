@@ -20,17 +20,16 @@ def outcome_of(result) -> dict:
 
 
 def apply(store, task_id: str, args: dict):
-    """Store the outcome under the lock; returns the updated task, or None if it vanished meanwhile."""
+    """Store the outcome under the lock; returns the updated task, or None if it is no longer ours."""
     with locked(store.data_dir):
         all_tasks = store.read_tasks()
         task = next((t for t in all_tasks if t.id == task_id), None)
-        if task is None:
-            return None
+        if task is None or task.status != "running":
+            return None  # dropped, finished or replanned away while the brain was working
         task.status = _STATUS[args["outcome"]]
         task.files = args.get("files") or task.files
         task.proposal = args.get("proposal") or task.proposal
-        if args["outcome"] == "needs_approval":
-            task.approved = False  # a new proposal needs its own approval
+        task.approved = False  # an approval covers one run; a retry or a new proposal needs its own
         store.write_tasks(all_tasks)
         return task
 
@@ -83,8 +82,9 @@ def _approval_buttons(store, task) -> list[tuple[str, str]]:
 def _send_file(chat, name: str, wdir: Path, repo: str) -> None:
     path = (wdir / name).resolve()
     roots = [wdir.resolve(), *([Path(repo).resolve()] if repo else [])]
-    if not path.is_file() or not any(path.is_relative_to(r) for r in roots):
-        return
+    root = next((r for r in roots if path.is_relative_to(r)), None)
+    if root is None or not path.is_file() or any(p.startswith(".") for p in path.relative_to(root).parts):
+        return  # outside the work dir and repo, or a dotfile such as .env or .git/*
     if path.stat().st_size > _MAX_UPLOAD:
         chat.send(f"Too big for Telegram: {path}")
         return

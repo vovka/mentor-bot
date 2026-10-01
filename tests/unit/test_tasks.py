@@ -86,3 +86,21 @@ def test_render_sections():
         "**Waiting on you:**\n- Wait — reply\n\n**Failed:**\n- Fail\n\n"
         "**Then:**\n- Beta\n\nDone: 1 of 6"
     )
+
+
+def test_merge_gives_new_tasks_clean_runtime_fields_and_status():
+    new = [Task("x", "X", approved=True, proposal="rm -rf", files=["f"], provider="claude", status="running")]
+    (task,) = merge([], new)
+    assert (task.approved, task.proposal, task.files, task.provider, task.status) == (False, "", [], "", "todo")
+
+
+def test_merge_result_with_a_kept_running_task_still_parses():
+    old = [Task("a", "A", status="done"), Task("b", "B", deps=["a"], status="running")]
+    merged = merge(old, [Task("c", "C")])
+    assert [t.id for t in parse(dump(merged))] == ["b", "c"] and merged[0].deps == []
+
+
+def test_parse_rejects_ids_that_cannot_travel_in_callback_data():
+    for bad in ("a:b", "x" * 49, "has space"):
+        with pytest.raises(ValueError, match="task id"):
+            parse(json.dumps({"tasks": [{"id": bad, "title": "T"}]}))
