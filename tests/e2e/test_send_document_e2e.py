@@ -14,3 +14,16 @@ def test_send_document_hits_send_document(monkeypatch):
     method, payload = stub.calls[-1]
     assert method == "sendDocument" and payload["_bytes"] > 5
     stub.stop()
+
+
+def test_edit_tolerates_an_unchanged_message(monkeypatch):
+    import io
+    import urllib.error
+
+    def not_modified(*args, **kwargs):
+        body = io.BytesIO(b'{"ok":false,"description":"Bad Request: message is not modified"}')
+        raise urllib.error.HTTPError("u", 400, "Bad Request", {}, body)
+
+    chat = TelegramChat("token", "1")
+    monkeypatch.setattr(chat, "_call", not_modified)
+    chat.edit(17, "same text")

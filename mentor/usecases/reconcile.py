@@ -7,7 +7,7 @@ from mentor.domain import tasks
 from mentor.domain.actions import BrainTask
 from mentor.domain.settings import BrainSettings
 from mentor.usecases import checkin_state, morning_brief
-from mentor.usecases.replan import current_tasks
+from mentor.usecases.replan import PLAN_TIMEOUT, current_tasks
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "reconcile.md"
 BUTTONS = [("Approve", "approve"), ("Reject", "reject")]
@@ -20,6 +20,7 @@ def run(store, brain, chat, clock) -> str:
         cwd=str(store.data_dir),
         write=False,
         settings=BrainSettings(**store.read_settings()["heavy"]),
+        timeout=PLAN_TIMEOUT,
     )
     result = brain.run(task)
     error = _invalid(result.document)

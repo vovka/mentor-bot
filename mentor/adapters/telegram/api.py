@@ -65,11 +65,15 @@ class TelegramChat:
             return json.loads(resp.read())["result"]["message_id"]
 
     def edit(self, id: int, text: str) -> None:
-        self._call(
-            "editMessageText",
-            {"chat_id": self._chat_id, "message_id": id, "text": text},
-            _CALL_TIMEOUT,
-        )
+        try:
+            self._call(
+                "editMessageText",
+                {"chat_id": self._chat_id, "message_id": id, "text": text},
+                _CALL_TIMEOUT,
+            )
+        except urllib.error.HTTPError as error:
+            if b"not modified" not in error.read():  # Telegram answers 400 when the text is unchanged
+                raise
 
     def pin(self, id: int) -> None:
         self._call(

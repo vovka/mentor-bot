@@ -9,6 +9,7 @@ from mentor.usecases import apply_plan
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "replan.md"
 
+PLAN_TIMEOUT = 900  # writing the whole graph on a heavy model takes minutes
 _NO_TASKS = "(none yet — convert the legacy plan below into tasks)"
 
 
@@ -19,6 +20,7 @@ def run(store, brain, chat, clock, reason: str) -> str:
         cwd=str(store.data_dir),
         write=False,
         settings=BrainSettings(**store.read_settings()["heavy"]),
+        timeout=PLAN_TIMEOUT,
     )
     result = brain.run(task)
 

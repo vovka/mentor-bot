@@ -1,6 +1,6 @@
 # Mentor assistant bot — architecture
 
-Status 2026-10-01: built, 130 tests, live-tested, running as a systemd user service.
+Status 2026-10-01: built, 131 tests, live-tested, running as a systemd user service.
 Published page with the same diagrams: https://claude.ai/artifact/Kz2GVi8aQ5SpxxtQVg1HFD
 
 ## 1. What it is
@@ -407,7 +407,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  subgraph "tests/ · 130 · no network"
+  subgraph "tests/ · 131 · no network"
     U[unit: settings · store · markdown] --> UC[usecases: fake brain + fake chat]
     UC --> E2E["e2e: Bot API stub (http.server) + fake brain<br/>full day: chat → settings → replan → morning → compact"]
   end
