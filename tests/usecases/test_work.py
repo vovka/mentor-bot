@@ -63,7 +63,8 @@ def test_needs_approval_stores_proposal_and_sends_buttons(tmp_path):
     work.run(store, brain, chat, _CLOCK)
     (task,) = store.read_tasks()
     assert task.status == "awaiting_approval" and task.proposal == "incus launch"
-    assert chat.buttons[1] == [("Approve", "t:s:ok"), ("Approve · codex", "t:s:alt"), ("Reject", "t:s:no")]
+    assert chat.html_edits[-1][1].startswith("🟠 Needs approval: Set up VM")
+    assert chat.buttons[2] == [("Approve", "t:s:ok"), ("Approve · codex", "t:s:alt"), ("Reject", "t:s:no")]
 
 
 def test_needs_user_sends_action_with_done_button(tmp_path):
@@ -71,7 +72,7 @@ def test_needs_user_sends_action_with_done_button(tmp_path):
     store, brain, chat = _setup(tmp_path, Task("a", "Apply"), results=results)
     work.run(store, brain, chat, _CLOCK)
     assert _status(store) == {"a": "awaiting_user"}
-    assert "Click submit" in chat.outbox[1] and [("Done", "t:a:done")] in chat.buttons.values()
+    assert "Click submit" in chat.outbox[0] and [("Done", "t:a:done")] in chat.buttons.values()
 
 
 def test_failed_blocks_dependants(tmp_path):
@@ -84,7 +85,8 @@ def test_brain_error_counts_as_failed(tmp_path):
     error = BrainResult(reply="brain error: timeout", actions=[], raw={})
     store, brain, chat = _setup(tmp_path, Task("a", "A"), results=[error])
     work.run(store, brain, chat, _CLOCK)
-    assert _status(store) == {"a": "failed"} and "brain error: timeout" in chat.outbox[0]
+    assert _status(store) == {"a": "failed"} and chat.html_edits[-1][1].startswith("❌ Failed: A")
+    assert "brain error: timeout" in chat.html_edits[-1][1]
 
 
 def test_budget_stops_loop(tmp_path):
@@ -163,7 +165,7 @@ def test_result_for_a_task_dropped_meanwhile_is_discarded(tmp_path):
             return _result("done")
 
     work.run(store, DroppingBrain(), chat, _CLOCK)
-    assert _status(store) == {"a": "dropped"} and not any(m.startswith("Done: Research") for m in chat.outbox)
+    assert _status(store) == {"a": "dropped"} and chat.html_edits[-1][1].startswith("⚪ Dropped meanwhile")
 
 
 def test_missing_cli_fails_the_task_and_dotfiles_are_not_sent(tmp_path):
@@ -189,7 +191,8 @@ def test_files_are_listed_not_sent_unless_marked_to_send(tmp_path):
         (tmp_path / "work" / "a" / name).write_text("x")
     work.run(store, brain, chat, _CLOCK)
     assert chat.documents == [("deck.pdf", "", 1)]
-    assert "- notes.md" in chat.outbox[0] and "- report.md" not in chat.outbox[0]
+    final = chat.html_edits[-1][1]
+    assert "- notes.md" in final and "- report.md" not in final
 
 
 def test_send_files_action_sends_requested_files(tmp_path):
@@ -202,3 +205,18 @@ def test_send_files_action_sends_requested_files(tmp_path):
     assert "Sent 1" in send_files.run(store, chat, {"task_id": "a", "files": ["notes.md"]})
     assert chat.documents == [("notes.md", "", 1)]
     assert "Sent 2" in send_files.run(store, chat, {"task_id": "a"})
+
+
+def test_progress_message_is_sent_once_then_edited_to_the_outcome(tmp_path):
+    store, _, chat = _setup(tmp_path, Task("a", "Research"))
+
+    class SteppingBrain:
+        def run(self, task):
+            task.on_step("ran `ls`")
+            return _result("done", "found it")
+
+    work.run(store, SteppingBrain(), chat, _CLOCK)
+    assert len(chat.html_sent) == 1 and chat.html_sent[0].startswith("⏳ Research\nresearch · codex")
+    (msg_id, final), = chat.html_edits
+    assert msg_id == 1 and final.startswith("✅ Done: Research") and final.endswith("</blockquote>\nfound it")
+    assert "ran `ls`" in (tmp_path / "work" / "a" / "steps.md").read_text()

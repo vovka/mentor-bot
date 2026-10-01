@@ -37,8 +37,9 @@ def test_first_run_sends_and_pins_and_stores_id(tmp_path):
 
     assert summary == "moved items around"
     assert chat.outbox == [tasks.render(store.read_tasks())]
-    assert chat.pinned == [1]
-    assert store.read_state()["pinned_message_id"] == 1
+    assert chat.pinned == [2]  # 1 is the progress message
+    assert store.read_state()["pinned_message_id"] == 2
+    assert chat.html_sent[0].startswith("⏳ Replanning") and chat.html_edits[-1][1].startswith("✅ Done: Replanning")
     assert store.read_state()["last_replan"] == "2026-09-29"
     assert store.read_plan() == tasks.render(store.read_tasks())
     assert [t.title for t in store.read_tasks()] == ["item"]
@@ -55,8 +56,8 @@ def test_second_run_edits_the_same_pinned_message(tmp_path):
     replan.run(store, _DocBrain(_doc("v3"), "second change"), chat, clock, reason="second")
 
     assert len(chat.outbox) == 1
-    assert chat.edits == [(1, tasks.render(store.read_tasks()))]
-    assert store.read_state()["pinned_message_id"] == 1
+    assert chat.edits == [(2, tasks.render(store.read_tasks()))]
+    assert store.read_state()["pinned_message_id"] == 2
 
 
 def test_pinned_text_never_exceeds_telegram_limit(tmp_path):

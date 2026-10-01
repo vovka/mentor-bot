@@ -5,6 +5,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from mentor.adapters.brain import stream
 from mentor.adapters.brain.codex_cli import browser_mcp_command
 from mentor.domain.actions import Action, BrainResult, BrainTask
 
@@ -20,15 +21,18 @@ class ClaudeBrain:
     def run(self, task: BrainTask) -> BrainResult:
         timeout = task.timeout or _TIMEOUT
         try:
-            result = subprocess.run(
-                self._build_cmd(task),
-                input=task.prompt,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=task.cwd,
-                env=os.environ,
-            )
+            if task.on_step:
+                result = _stream(self._build_cmd(task), task, timeout)
+            else:
+                result = subprocess.run(
+                    self._build_cmd(task),
+                    input=task.prompt,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    cwd=task.cwd,
+                    env=os.environ,
+                )
         except subprocess.TimeoutExpired:
             return BrainResult(reply=f"brain error: timed out after {timeout}s", actions=[], raw={})
         return self._parse(result)
@@ -46,7 +50,7 @@ class ClaudeBrain:
             "--effort",
             task.settings.effort,
             "--output-format",
-            "json",
+            *(["stream-json", "--verbose"] if task.on_step else ["json"]),
             "--json-schema",
             self._schema,
             "--allowedTools",
@@ -80,6 +84,21 @@ class ClaudeBrain:
                 actions=[],
                 raw={"stderr": result.stderr},
             )
+
+
+def _stream(cmd: list[str], task: BrainTask, timeout: int) -> subprocess.CompletedProcess:
+    """stream-json: tool calls become steps; the closing `result` event is the json-mode output."""
+    final: list[dict] = []
+
+    def on_event(event: dict) -> None:
+        if event.get("type") == "result":
+            final.append(event)
+        for line in stream.claude_steps(event):
+            task.on_step(line)
+
+    done = stream.run(cmd, task.prompt, timeout, on_event, cwd=task.cwd, env=os.environ)
+    stdout = json.dumps(final[-1]) if final else ""
+    return subprocess.CompletedProcess(cmd, done.returncode, stdout, done.stderr)
 
 
 def _browser_flags() -> list[str]:

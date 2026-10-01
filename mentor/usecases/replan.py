@@ -5,7 +5,7 @@ from pathlib import Path
 from mentor.domain import tasks
 from mentor.domain.actions import BrainTask
 from mentor.domain.settings import BrainSettings
-from mentor.usecases import apply_plan
+from mentor.usecases import apply_plan, progress
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "replan.md"
 
@@ -22,7 +22,7 @@ def run(store, brain, chat, clock, reason: str) -> str:
         settings=BrainSettings(**store.read_settings()["heavy"]),
         timeout=PLAN_TIMEOUT,
     )
-    result = brain.run(task)
+    result = progress.tracked(chat, brain, task, "Replanning", "replan")
 
     marks = {"last_replan": today.isoformat()}
     if not result.document:

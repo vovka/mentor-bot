@@ -34,23 +34,23 @@ def apply(store, task_id: str, args: dict):
         return task
 
 
-def notify(store, chat, mail, task, args: dict, reply: str, wdir: Path, repo: str) -> None:
+def notify(store, chat, mail, task, args: dict, reply: str, wdir: Path, repo: str, progress) -> None:
+    """Finalize the progress message with the outcome and brief; buttons, files and drafts follow it."""
     outcome = args["outcome"]
     store.append_history(f"work: {task.title} [{outcome}]: {reply}")
     if outcome in ("done", "needs_user"):
-        _hand_off(chat, mail, task, args, reply, wdir, repo)
-    elif outcome == "needs_approval":
+        _hand_off(chat, mail, task, args, reply, wdir, repo, progress)
+        return
+    progress.finish(outcome, reply)
+    if outcome == "needs_approval":
         chat.send(f"Approve? {task.title}\n\n{task.proposal}", buttons=_approval_buttons(store, task))
-    else:
-        chat.send(f"Failed: {task.title}\n\n{reply}")
 
 
-def _hand_off(chat, mail, task, args: dict, reply: str, wdir: Path, repo: str) -> None:
+def _hand_off(chat, mail, task, args: dict, reply: str, wdir: Path, repo: str, progress) -> None:
     """Report, deliverables and email drafts; a task that still needs the human ends with a Done button."""
     (wdir / "report.md").write_text(reply)
     listed = "\n".join(f"- {Path(f).name}" for f in task.files if Path(f).name != "report.md")
-    files = f"\n\nFiles (ask me to send any):\n{listed}" if listed else ""
-    chat.send(f"{'Done' if args['outcome'] == 'done' else 'Prepared'}: {task.title}\n\n{reply}{files}")
+    progress.finish(args["outcome"], reply, f"\n\nFiles (ask me to send any):\n{listed}" if listed else "")
     for path in args.get("send") or []:  # only what the human must upload or attach somewhere
         send_file(chat, path, wdir, repo)
     for draft in args.get("drafts") or []:

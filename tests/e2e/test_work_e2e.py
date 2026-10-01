@@ -63,3 +63,13 @@ def test_user_task_done_press_runs_next(tmp_path, monkeypatch):
     _press(stub, store, brain, chat, "t:u:done")
     assert [t.status for t in store.read_tasks()] == ["done", "done"] and len(brain.tasks) == 1
     stub.stop()
+
+
+def test_progress_message_is_html_and_edited_in_place(tmp_path, monkeypatch):
+    stub, store, chat, brain = _env(tmp_path, monkeypatch, [Task("a", "Draft <x>")], [_result("done")])
+    work.run(store, brain, chat, _CLOCK)
+    first = next(p for m, p in stub.calls if m == "sendMessage")
+    final = [p for m, p in stub.calls if m == "editMessageText" and p.get("parse_mode") == "HTML"][-1]
+    assert first["parse_mode"] == "HTML" and first["text"].startswith("⏳ Draft &lt;x&gt;")
+    assert final["message_id"] == 1 and final["text"].startswith("✅ Done: Draft &lt;x&gt;")
+    stub.stop()

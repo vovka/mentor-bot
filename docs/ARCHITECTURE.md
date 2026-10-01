@@ -1,6 +1,6 @@
 # Mentor assistant bot — architecture
 
-Status 2026-10-01: built, 131 tests, live-tested, running as a systemd user service.
+Status 2026-10-02: built, 143 tests, live-tested, running as a systemd user service.
 Published page with the same diagrams: https://claude.ai/artifact/Kz2GVi8aQ5SpxxtQVg1HFD
 
 ## 1. What it is
@@ -177,6 +177,12 @@ flowchart LR
   CMD -- "non-zero / timeout" --> ERR["reply: brain error: <stderr tail>"]
 ```
 
+Streaming: when `BrainTask.on_step` is set (worker, replan, scout), Codex adds `--json` (JSONL events on
+stdout, `-o` still holds the answer) and Claude uses `--output-format stream-json --verbose` (the closing
+`result` event is the json-mode output). `adapters/brain/stream.py` reads stdout line by line, enforces the
+timeout itself (kills the process group) and maps tool calls to short lines ("ran `ls`", "edited a.txt").
+Unknown or broken events are skipped. Without `on_step` the commands are unchanged.
+
 `--ignore-user-config`: this machine's `~/.codex/config.toml` routes to a local proxy and MCP servers that hang headless.
 
 ### Allowed models (`domain/settings.py`)
@@ -250,15 +256,25 @@ flowchart TB
   BG -- no --> FIN
   BG -- yes --> BR["brain run in work dir<br/>tier by kind, timeout work.timeout"]
   BR --> OC{"task_result outcome"}
-  OC -- done --> T1["send report + files + email drafts"]
+  OC -- done --> T1["finalize progress message + files + email drafts"]
   OC -- needs_user --> T2["send report + files + drafts<br/>+ exact action + Done button"]
   OC -- needs_approval --> T3["send proposal<br/>Approve · Approve other provider · Reject"]
-  OC -- "failed or missing" --> T4["send 'Failed' + reply"]
+  OC -- "failed or missing" --> T4["progress message: Failed + reply"]
   T1 & T2 & T3 & T4 --> NX[next ready task]
   PK --> NX
   NX --> CL
   FIN["send 'Work loop finished' summary<br/>refresh plan.md and pin"]
 ```
+
+Progress message (`usecases/progress.py`): each worker run, replan and scout posts one HTML message
+(`Chat.send_html`) — `⏳ title`, `kind · provider model · effort E · elapsed`, the step log in a
+`<blockquote>` — re-rendered every 10 s by a daemon thread (`edit_html`). On finish the same message
+becomes `✅ Done` / `🟡 Prepared` / `🟠 Needs approval` / `❌ Failed`, total time, the log collapsed
+(`<blockquote expandable>`) and, for worker tasks, the brief plus the files list; replan and scout end
+with just the status and keep their usual reply. It stays under 4096 chars: older steps are counted as
+"(N earlier steps in steps.md)", a long brief is cut with "…" (full text in `report.md`). Every step
+is also appended with a timestamp to `steps.md` in the work dir. Telegram errors are printed, never raised.
+Buttons, files and drafts follow as separate plain-text messages.
 
 Details:
 
@@ -365,9 +381,9 @@ mentor/
   usecases/    handle_update.py handle_message.py busy.py morning_brief.py replan.py
                scout.py compact.py change_settings.py add_project.py send_image.py
                morning_checkin.py checkin.py checkin_state.py reconcile.py
-               apply_plan.py work.py work_brain.py work_result.py task_buttons.py task_update.py
+               apply_plan.py work.py work_brain.py work_result.py progress.py task_buttons.py task_update.py
   ports/       chat.py brain.py store.py clock.py renderer.py mail.py
-  adapters/    telegram/{api,markdown,fake}.py  brain/{router,codex_cli,claude_cli,fake}.py
+  adapters/    telegram/{api,markdown,fake}.py  brain/{router,codex_cli,claude_cli,stream,fake}.py
                store/{files,lock}.py  scheduler/inprocess.py  render/{kroki,fake}.py  mail/imap.py
   app/         config.py container.py cli.py jobs.py kick.py
 data/          tasks.json plan.md settings.json state.json work.log history/
@@ -407,7 +423,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  subgraph "tests/ · 131 · no network"
+  subgraph "tests/ · 143 · no network"
     U[unit: settings · store · markdown] --> UC[usecases: fake brain + fake chat]
     UC --> E2E["e2e: Bot API stub (http.server) + fake brain<br/>full day: chat → settings → replan → morning → compact"]
   end

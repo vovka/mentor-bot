@@ -25,7 +25,7 @@ def _dispatch_work(services):
 
 def _dispatch_scout(store, brain, chat, clock, args):
     scout = importlib.import_module("mentor.usecases.scout")
-    return scout.run(store, brain, args.get("project", ""), args.get("question", ""))
+    return scout.run(store, brain, chat, args.get("project", ""), args.get("question", ""))
 
 
 _DISPATCH = {

@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from mentor.adapters.brain import stream
 from mentor.domain.actions import Action, BrainResult, BrainTask
 
 _TIMEOUT = 180
@@ -40,9 +41,12 @@ class CodexBrain:
             cmd += ["--", task.prompt]
         timeout = task.timeout or _TIMEOUT
         try:
-            result = subprocess.run(
-                cmd, input=stdin_text, capture_output=True, text=True, timeout=timeout
-            )
+            if task.on_step:
+                result = stream.run(cmd, stdin_text, timeout, lambda e: _report(e, task.on_step))
+            else:
+                result = subprocess.run(
+                    cmd, input=stdin_text, capture_output=True, text=True, timeout=timeout
+                )
         except subprocess.TimeoutExpired:
             return BrainResult(reply=f"brain error: timed out after {timeout}s", actions=[], raw={})
         return self._parse(out_path, result)
@@ -68,6 +72,7 @@ class CodexBrain:
             "--ignore-user-config",  # user config points at a local proxy + MCP servers that hang headless
             "--output-schema",
             self._schema_path,
+            *(["--json"] if task.on_step else []),  # JSONL events on stdout; -o still gets the answer
         ]
         return cmd + _write_flags(task) if task.write else cmd
 
@@ -81,6 +86,11 @@ class CodexBrain:
         except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError):
             reply = result.stdout.strip() or f"brain error: {result.stderr.strip()[-300:]}"
             return BrainResult(reply=reply, actions=[], raw={"stderr": result.stderr})
+
+
+def _report(event: dict, on_step) -> None:
+    for line in stream.codex_steps(event):
+        on_step(line)
 
 
 def _write_flags(task: BrainTask) -> list[str]:

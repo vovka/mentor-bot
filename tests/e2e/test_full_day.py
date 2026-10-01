@@ -100,8 +100,9 @@ def test_full_day_scenario(tmp_path, monkeypatch):
     # run the same again -> editMessageText on the same pinned id, no second pin.
     calls_before = len(stub.calls)
     offset = _step(container, stub, offset, "move demo to Friday", _replan_results("on it again", _DOC))
-    edits = [c for c in stub.calls[calls_before:] if c[0] == "editMessageText"]
-    assert edits and edits[0][1]["message_id"] == pinned_id
+    edits = [c[1] for c in stub.calls[calls_before:] if c[0] == "editMessageText"]
+    assert [e["message_id"] for e in edits if "parse_mode" not in e] == [pinned_id]
+    assert any(e["text"].startswith("✅ Done: Replanning") and e["parse_mode"] == "HTML" for e in edits)
     assert len([c for c in stub.calls if c[0] == "pinChatMessage"]) == 1
 
     # d. replaying an already-seen update_id makes zero new Bot API calls.

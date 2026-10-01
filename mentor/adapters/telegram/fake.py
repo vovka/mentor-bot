@@ -8,6 +8,8 @@ class FakeChat:
         self.outbox: list[str] = []
         self.edits: list[tuple[int, str]] = []
         self.pinned: list[int] = []
+        self.html_sent: list[str] = []
+        self.html_edits: list[tuple[int, str]] = []
         self.reactions: list[tuple[int, str | None]] = []
         self.photos: list[tuple[bytes, str]] = []
         self.documents: list[tuple[str, str, int]] = []
@@ -42,6 +44,15 @@ class FakeChat:
 
     def edit(self, id: int, text: str) -> None:
         self.edits.append((id, text))
+
+    def send_html(self, text: str) -> int:
+        self.html_sent.append(text)
+        msg_id = self._next_id
+        self._next_id += 1
+        return msg_id
+
+    def edit_html(self, id: int, text: str) -> None:
+        self.html_edits.append((id, text))
 
     def pin(self, id: int) -> None:
         self.pinned.append(id)

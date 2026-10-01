@@ -65,12 +65,18 @@ class TelegramChat:
             return json.loads(resp.read())["result"]["message_id"]
 
     def edit(self, id: int, text: str) -> None:
+        self._edit({"chat_id": self._chat_id, "message_id": id, "text": text})
+
+    def send_html(self, text: str) -> int:
+        params = {"chat_id": self._chat_id, "text": text, "parse_mode": "HTML"}
+        return self._call("sendMessage", params, _CALL_TIMEOUT)["result"]["message_id"]
+
+    def edit_html(self, id: int, text: str) -> None:
+        self._edit({"chat_id": self._chat_id, "message_id": id, "text": text, "parse_mode": "HTML"})
+
+    def _edit(self, params: dict) -> None:
         try:
-            self._call(
-                "editMessageText",
-                {"chat_id": self._chat_id, "message_id": id, "text": text},
-                _CALL_TIMEOUT,
-            )
+            self._call("editMessageText", params, _CALL_TIMEOUT)
         except urllib.error.HTTPError as error:
             if b"not modified" not in error.read():  # Telegram answers 400 when the text is unchanged
                 raise
