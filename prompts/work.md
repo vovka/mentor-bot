@@ -61,5 +61,7 @@ Reply with JSON ONLY, matching the schema. `document` must be null.
   then the single thing they must do next, if anything.
 - `actions`: exactly one action of kind `task_result` with args:
   `outcome` (`done` | `needs_approval` | `needs_user` | `failed`), `files` (paths of the
-  deliverables, relative to the work dir or absolute), `user_action`, `proposal`, `drafts`.
+  deliverables, relative to the work dir or absolute; they are listed by name, not sent), `send`
+  (only files the human must upload or attach somewhere right now, e.g. a deck for a form;
+  usually null), `user_action`, `proposal`, `drafts`.
   Set unused args to null.

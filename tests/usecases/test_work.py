@@ -28,7 +28,7 @@ def _status(store):
 
 def test_done_sends_report_and_file_then_picks_next(tmp_path):
     store, brain, chat = _setup(tmp_path, Task("a", "Research"), Task("b", "Write", kind="writing", deps=["a"]),
-                                results=[_result("done", "found it", files=["notes.md"]), _result("done")])
+                                results=[_result("done", "found it", files=["notes.md"], send=["notes.md"]), _result("done")])
     (tmp_path / "work" / "a").mkdir(parents=True)
     (tmp_path / "work" / "a" / "notes.md").write_text("notes")
     work.run(store, brain, chat, _CLOCK)
@@ -42,7 +42,7 @@ def test_done_sends_report_and_file_then_picks_next(tmp_path):
 
 def test_file_outside_work_dir_is_not_sent(tmp_path):
     (tmp_path / "secret.txt").write_text("x")
-    store, brain, chat = _setup(tmp_path, Task("a", "A"), results=[_result("done", files=["../../secret.txt"])])
+    store, brain, chat = _setup(tmp_path, Task("a", "A"), results=[_result("done", files=["../../secret.txt"], send=["../../secret.txt"])])
     work.run(store, brain, chat, _CLOCK)
     assert chat.documents == []
 
@@ -124,7 +124,7 @@ def test_needs_user_hands_over_files_and_drafts(tmp_path):
 
     draft = {"to": "a@b.c", "subject": "Hi", "body": "text"}
     store, brain, chat = _setup(tmp_path, Task("a", "Apply"), results=[
-        _result("needs_user", "prepared", files=["answers.md"], user_action="Submit the form", drafts=[draft])])
+        _result("needs_user", "prepared", files=["answers.md"], send=["answers.md"], user_action="Submit the form", drafts=[draft])])
     (tmp_path / "work" / "a").mkdir(parents=True)
     (tmp_path / "work" / "a" / "answers.md").write_text("answers")
     mail = FakeMail()
@@ -171,7 +171,7 @@ def test_missing_cli_fails_the_task_and_dotfiles_are_not_sent(tmp_path):
         def run(self, task):
             raise FileNotFoundError("codex")
 
-    store, brain, chat = _setup(tmp_path, Task("a", "A"), Task("b", "B"), results=[_result("done", files=[".env"])])
+    store, brain, chat = _setup(tmp_path, Task("a", "A"), Task("b", "B"), results=[_result("done", files=[".env"], send=[".env"])])
     (tmp_path / "work" / "b").mkdir(parents=True)
     (tmp_path / "work" / "b" / ".env").write_text("SECRET")
     work.run(store, BrokenBrain(), chat, _CLOCK)
@@ -179,3 +179,26 @@ def test_missing_cli_fails_the_task_and_dotfiles_are_not_sent(tmp_path):
     store.write_tasks([Task("b", "B")])
     work.run(store, brain, chat, _CLOCK)
     assert _status(store) == {"b": "done"} and chat.documents == []
+
+
+def test_files_are_listed_not_sent_unless_marked_to_send(tmp_path):
+    store, brain, chat = _setup(tmp_path, Task("a", "Deck"),
+                                results=[_result("done", files=["notes.md", "deck.pdf", "report.md"], send=["deck.pdf"])])
+    (tmp_path / "work" / "a").mkdir(parents=True)
+    for name in ("notes.md", "deck.pdf"):
+        (tmp_path / "work" / "a" / name).write_text("x")
+    work.run(store, brain, chat, _CLOCK)
+    assert chat.documents == [("deck.pdf", "", 1)]
+    assert "- notes.md" in chat.outbox[0] and "- report.md" not in chat.outbox[0]
+
+
+def test_send_files_action_sends_requested_files(tmp_path):
+    from mentor.usecases import send_files
+
+    store, _, chat = _setup(tmp_path, Task("a", "Deck", files=["notes.md", "deck.pdf"]))
+    (tmp_path / "work" / "a").mkdir(parents=True)
+    for name in ("notes.md", "deck.pdf"):
+        (tmp_path / "work" / "a" / name).write_text("x")
+    assert "Sent 1" in send_files.run(store, chat, {"task_id": "a", "files": ["notes.md"]})
+    assert chat.documents == [("notes.md", "", 1)]
+    assert "Sent 2" in send_files.run(store, chat, {"task_id": "a"})

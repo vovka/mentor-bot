@@ -5,7 +5,7 @@ from pathlib import Path
 
 from mentor.domain.actions import BrainTask
 from mentor.domain.settings import ALLOWED, BrainSettings
-from mentor.usecases import add_project, change_settings, send_image, task_update
+from mentor.usecases import add_project, change_settings, send_files, send_image, task_update
 from mentor.usecases.busy import busy
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "mentor.md"
@@ -36,6 +36,7 @@ _DISPATCH = {
     "send_image": lambda s, brain, chat, clock, args: send_image.run(s.renderer, chat, args),
     "work": lambda s, brain, chat, clock, args: _dispatch_work(s),
     "task_update": lambda s, brain, chat, clock, args: task_update.run(s.store, chat, s.kick, args),
+    "send_files": lambda s, brain, chat, clock, args: send_files.run(s.store, chat, args),
 }
 
 

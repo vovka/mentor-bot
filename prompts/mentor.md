@@ -59,6 +59,8 @@ and never send files of any other kind.
   retried. Include `task_id` (from data/tasks.json), `status` (`done`, `dropped`, or `todo` to
   retry) and an optional short `note`. Changes to the plan's structure still go through `replan`.
 - `work`: the user asks to continue, or "what's next, do it". No args.
+- `send_files`: the user asks for a task's files. Include `task_id` and `files` (file names to
+  send, or null for all of the task's files).
 - Never emit `task_result`; it is for the worker only.
 
 Only emit actions the user's message actually asked for. Most replies need no action at all.

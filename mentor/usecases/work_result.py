@@ -48,9 +48,11 @@ def notify(store, chat, mail, task, args: dict, reply: str, wdir: Path, repo: st
 def _hand_off(chat, mail, task, args: dict, reply: str, wdir: Path, repo: str) -> None:
     """Report, deliverables and email drafts; a task that still needs the human ends with a Done button."""
     (wdir / "report.md").write_text(reply)
-    chat.send(f"{'Done' if args['outcome'] == 'done' else 'Prepared'}: {task.title}\n\n{reply}")
-    for path in task.files:
-        _send_file(chat, path, wdir, repo)
+    listed = "\n".join(f"- {Path(f).name}" for f in task.files if Path(f).name != "report.md")
+    files = f"\n\nFiles (ask me to send any):\n{listed}" if listed else ""
+    chat.send(f"{'Done' if args['outcome'] == 'done' else 'Prepared'}: {task.title}\n\n{reply}{files}")
+    for path in args.get("send") or []:  # only what the human must upload or attach somewhere
+        send_file(chat, path, wdir, repo)
     for draft in args.get("drafts") or []:
         chat.send(_save_draft(mail, draft))
     if args["outcome"] == "needs_user":
@@ -79,13 +81,14 @@ def _approval_buttons(store, task) -> list[tuple[str, str]]:
     return [("Approve", f"t:{task.id}:ok"), *alt, ("Reject", f"t:{task.id}:no")]
 
 
-def _send_file(chat, name: str, wdir: Path, repo: str) -> None:
+def send_file(chat, name: str, wdir: Path, repo: str) -> bool:
     path = (wdir / name).resolve()
     roots = [wdir.resolve(), *([Path(repo).resolve()] if repo else [])]
     root = next((r for r in roots if path.is_relative_to(r)), None)
     if root is None or not path.is_file() or any(p.startswith(".") for p in path.relative_to(root).parts):
-        return  # outside the work dir and repo, or a dotfile such as .env or .git/*
+        return False  # outside the work dir and repo, or a dotfile such as .env or .git/*
     if path.stat().st_size > _MAX_UPLOAD:
         chat.send(f"Too big for Telegram: {path}")
-        return
+        return True
     chat.send_document(path.read_bytes(), path.name)
+    return True

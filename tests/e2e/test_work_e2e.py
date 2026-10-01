@@ -39,7 +39,7 @@ def _sent(stub):
 
 
 def test_ready_task_done_with_file(tmp_path, monkeypatch):
-    stub, store, chat, brain = _env(tmp_path, monkeypatch, [Task("a", "Draft")], [_result("done", files=["d.md"])])
+    stub, store, chat, brain = _env(tmp_path, monkeypatch, [Task("a", "Draft")], [_result("done", files=["d.md"], send=["d.md"])])
     (tmp_path / "work" / "a").mkdir(parents=True)
     (tmp_path / "work" / "a" / "d.md").write_text("draft")
     work.run(store, brain, chat, _CLOCK)
