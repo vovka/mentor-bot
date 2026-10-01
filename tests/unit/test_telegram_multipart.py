@@ -9,3 +9,8 @@ def test_multipart_body_has_fields_and_file():
     assert b'name="chat_id"\r\n\r\n1\r\n' in body
     assert b'name="photo"; filename="d.png"\r\nContent-Type: image/png\r\n\r\n\x89PNG\r\n' in body
     assert body.endswith(f"--{boundary}--\r\n".encode())
+
+
+def test_multipart_content_type_is_configurable():
+    body, _ = _multipart({}, "document", "n.pdf", b"x", "application/pdf")
+    assert b'filename="n.pdf"\r\nContent-Type: application/pdf\r\n' in body

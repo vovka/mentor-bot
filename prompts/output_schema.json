@@ -8,7 +8,7 @@
       "items": {
         "type": "object",
         "properties": {
-          "kind": { "type": "string", "enum": ["replan", "scout", "set_settings", "add_project", "send_image"] },
+          "kind": { "type": "string", "enum": ["replan", "scout", "set_settings", "add_project", "send_image", "work", "task_update", "task_result"] },
           "args": {
             "type": "object",
             "properties": {
@@ -22,9 +22,25 @@
               "name": { "type": ["string", "null"] },
               "repo_path": { "type": ["string", "null"] },
               "diagram": { "type": ["string", "null"] },
-              "caption": { "type": ["string", "null"] }
+              "caption": { "type": ["string", "null"] },
+              "task_id": { "type": ["string", "null"] },
+              "status": { "type": ["string", "null"] },
+              "note": { "type": ["string", "null"] },
+              "outcome": { "type": ["string", "null"] },
+              "files": { "type": ["array", "null"], "items": { "type": "string" } },
+              "user_action": { "type": ["string", "null"] },
+              "proposal": { "type": ["string", "null"] },
+              "drafts": {
+                "type": ["array", "null"],
+                "items": {
+                  "type": "object",
+                  "properties": { "to": { "type": "string" }, "subject": { "type": "string" }, "body": { "type": "string" } },
+                  "required": ["to", "subject", "body"],
+                  "additionalProperties": false
+                }
+              }
             },
-            "required": ["reason", "project", "question", "provider", "model", "effort", "heavy", "name", "repo_path", "diagram", "caption"],
+            "required": ["reason", "project", "question", "provider", "model", "effort", "heavy", "name", "repo_path", "diagram", "caption", "task_id", "status", "note", "outcome", "files", "user_action", "proposal", "drafts"],
             "additionalProperties": false
           }
         },

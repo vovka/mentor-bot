@@ -23,6 +23,9 @@ _TEMPLATE = Path(__file__).resolve().parent.parent.parent / "data" / "projects" 
 _REPLAN_ACTION = [Action(kind="replan", args={"reason": "move demo to Friday"})]
 
 
+_DOC = '{"tasks": [{"id": "a-1", "title": "do it"}]}'
+
+
 def _build_container(tmp_path, stub, monkeypatch) -> Container:
     monkeypatch.setenv("TELEGRAM_API_BASE", stub.base_url)
     store = FileStore(tmp_path)
@@ -88,15 +91,15 @@ def test_full_day_scenario(tmp_path, monkeypatch):
 
     # c. replan action -> plan.md updated, sendMessage + pinChatMessage on first run.
     calls_before = len(stub.calls)
-    offset = _step(container, stub, offset, "move demo to Friday", _replan_results("on it", "# plan v2"))
-    assert container.store.read_plan() == "# plan v2"
+    offset = _step(container, stub, offset, "move demo to Friday", _replan_results("on it", _DOC))
+    assert container.store.read_plan() == "**Next:** do it\n\nDone: 0 of 1"
     new_calls = [c[0] for c in stub.calls[calls_before:]]
     assert "sendMessage" in new_calls and "pinChatMessage" in new_calls
     pinned_id = container.store.read_state()["pinned_message_id"]
 
     # run the same again -> editMessageText on the same pinned id, no second pin.
     calls_before = len(stub.calls)
-    offset = _step(container, stub, offset, "move demo to Friday", _replan_results("on it again", "# plan v2"))
+    offset = _step(container, stub, offset, "move demo to Friday", _replan_results("on it again", _DOC))
     edits = [c for c in stub.calls[calls_before:] if c[0] == "editMessageText"]
     assert edits and edits[0][1]["message_id"] == pinned_id
     assert len([c for c in stub.calls if c[0] == "pinChatMessage"]) == 1

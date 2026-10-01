@@ -10,6 +10,7 @@ class FakeChat:
         self.pinned: list[int] = []
         self.reactions: list[tuple[int, str | None]] = []
         self.photos: list[tuple[bytes, str]] = []
+        self.documents: list[tuple[str, str, int]] = []
         self.typing_calls = 0
         self.buttons: dict[int, list[tuple[str, str]]] = {}
         self.answered: list[str] = []
@@ -34,6 +35,10 @@ class FakeChat:
     def send_photo(self, png: bytes, caption: str) -> int:
         self.photos.append((png, caption))
         return self.send(f"[photo] {caption}")
+
+    def send_document(self, data: bytes, filename: str, caption: str = "") -> int:
+        self.documents.append((filename, caption, len(data)))
+        return self.send(f"[document] {filename} {caption}".strip())
 
     def edit(self, id: int, text: str) -> None:
         self.edits.append((id, text))

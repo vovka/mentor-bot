@@ -1,6 +1,6 @@
 """Fake Telegram Bot API for no-network e2e tests: an http.server on 127.0.0.1:<free port>,
 run in a background thread. Endpoints: getUpdates, sendMessage, editMessageText,
-pinChatMessage, answerCallbackQuery,
+pinChatMessage, answerCallbackQuery, sendPhoto, sendDocument,
 editMessageReplyMarkup, getMe. Every call is recorded as (method, payload) in `.calls`.
 """
 
@@ -47,7 +47,7 @@ class BotApiStub:
             return {"ok": True, "result": [u for u in self._updates if u["update_id"] >= offset]}
         if method == "getMe":
             return {"ok": True, "result": {"id": 1, "is_bot": True, "username": "stub_bot"}}
-        if method in ("sendMessage", "sendPhoto"):
+        if method in ("sendMessage", "sendPhoto", "sendDocument"):
             msg_id = self._next_message_id
             self._next_message_id += 1
             return {"ok": True, "result": {"message_id": msg_id}}

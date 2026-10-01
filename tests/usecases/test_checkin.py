@@ -1,15 +1,18 @@
+import json
 from datetime import datetime
 
 from mentor.adapters.brain.fake import FakeBrain
 from mentor.adapters.store.files import FileStore
 from mentor.adapters.telegram.fake import FakeChat
 from mentor.domain.actions import BrainResult
+from mentor.domain import tasks
 from mentor.domain.conversation import Update
 from mentor.usecases import handle_update, morning_checkin
 from tests.fixed_clock import FixedClock
 
+_DOC = json.dumps({"tasks": [{"id": "a-1", "title": "do A today"}]})
 _BRIEF = BrainResult(reply="good morning", actions=[], raw={})
-_PROPOSAL = BrainResult(reply="moved A to today", actions=[], raw={}, document="# new plan\n")
+_PROPOSAL = BrainResult(reply="moved A to today", actions=[], raw={}, document=_DOC)
 _NOTHING = BrainResult(reply="all done", actions=[], raw={}, document=None)
 
 
@@ -59,8 +62,9 @@ def test_approve_writes_plan_edits_pin_sends_brief(tmp_path):
     morning_checkin.morning(store, brain, chat, clock)
     _press(env, "yes", 1, 1)
     _press(env, "approve", 2, 2)
-    assert store.read_plan() == "# new plan\n"
-    assert chat.edits == [(99, "# new plan\n")]
+    assert [t.title for t in store.read_tasks()] == ["do A today"]
+    assert store.read_plan() == tasks.render(store.read_tasks())
+    assert chat.edits == [(99, store.read_plan())]
     assert chat.outbox[-1] == "good morning"
     assert _checkin(store) is None and store.read_state()["last_brief_date"] == "2026-09-30"
 
@@ -112,3 +116,12 @@ def test_updates_with_empty_proposal_send_plain_brief(tmp_path):
     morning_checkin.morning(store, brain, chat, clock)
     assert chat.outbox == ["good morning"]
     assert _checkin(store) is None
+
+
+def test_invalid_proposal_is_dropped_with_error_then_brief(tmp_path):
+    bad = BrainResult(reply="moved A", actions=[], raw={}, document="{nope")
+    store, brain, chat, clock = _setup(tmp_path, [bad, _BRIEF], history="user: done A\n")
+    morning_checkin.morning(store, brain, chat, clock)
+    assert chat.outbox[-2].startswith("Plan proposal discarded: invalid JSON")
+    assert chat.outbox[-1] == "good morning"
+    assert _checkin(store) is None and store.read_tasks() == []

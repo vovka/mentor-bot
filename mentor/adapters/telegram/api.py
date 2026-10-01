@@ -1,6 +1,7 @@
 """TelegramChat: Bot API adapter over stdlib urllib (send/edit/pin/poll/react/typing/buttons)."""
 
 import json
+import mimetypes
 import os
 import uuid
 import urllib.error
@@ -11,6 +12,7 @@ from mentor.adapters.telegram.markdown import chunk
 from mentor.domain.conversation import Update
 
 _CALL_TIMEOUT = 10
+_UPLOAD_TIMEOUT = 120
 _POLL_TIMEOUT = 40
 _POLL_WAIT = 30
 
@@ -49,12 +51,17 @@ class TelegramChat:
         self._call_quietly("editMessageReplyMarkup", params)
 
     def send_photo(self, png: bytes, caption: str) -> int:
+        return self._upload("sendPhoto", "photo", "diagram.png", png, caption, "image/png", _CALL_TIMEOUT * 3)
+
+    def send_document(self, data: bytes, filename: str, caption: str = "") -> int:
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return self._upload("sendDocument", "document", filename, data, caption, content_type, _UPLOAD_TIMEOUT)
+
+    def _upload(self, method, file_field, filename, data, caption, content_type, timeout) -> int:
         fields = {"chat_id": self._chat_id, "caption": caption[:1024]}
-        body, content_type = _multipart(fields, "photo", "diagram.png", png)
-        req = urllib.request.Request(
-            f"{self._base}/sendPhoto", data=body, headers={"Content-Type": content_type}
-        )
-        with urllib.request.urlopen(req, timeout=_CALL_TIMEOUT * 3) as resp:
+        body, header = _multipart(fields, file_field, filename, data, content_type)
+        req = urllib.request.Request(f"{self._base}/{method}", data=body, headers={"Content-Type": header})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())["result"]["message_id"]
 
     def edit(self, id: int, text: str) -> None:
@@ -126,7 +133,9 @@ class TelegramChat:
         )
 
 
-def _multipart(fields: dict, file_field: str, filename: str, data: bytes) -> tuple[bytes, str]:
+def _multipart(
+    fields: dict, file_field: str, filename: str, data: bytes, content_type: str = "image/png"
+) -> tuple[bytes, str]:
     boundary = uuid.uuid4().hex
     parts = []
     for name, value in fields.items():
@@ -135,7 +144,7 @@ def _multipart(fields: dict, file_field: str, filename: str, data: bytes) -> tup
         )
     parts.append(
         f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
-        f"filename=\"{filename}\"\r\nContent-Type: image/png\r\n\r\n".encode()
+        f"filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n".encode()
         + data
         + b"\r\n"
     )

@@ -118,3 +118,27 @@ def test_heavy_action_switches_reaction_to_thinking(tmp_path, monkeypatch):
     handle_message.run(store, brain, chat, _CLOCK, "what's in x?", message_id=7)
 
     assert chat.reactions == [(7, "👀"), (7, "🤔"), (7, None)]
+
+
+def test_work_action_kicks_worker(tmp_path):
+    kicks = []
+    brain = FakeBrain([BrainResult(reply="on it", actions=[Action(kind="work", args={})], raw={})])
+    reply = handle_message.run(FileStore(tmp_path), brain, FakeChat(), _CLOCK, "go", kick=lambda: kicks.append(1))
+    assert "Working on the next task." in reply and kicks == [1]
+
+
+def test_task_update_action(tmp_path):
+    from mentor.domain.tasks import Task
+
+    store, kicks = FileStore(tmp_path), []
+    store.write_tasks([Task("a", "A")])
+    actions = [
+        Action(kind="task_update", args={"task_id": "a", "status": "done", "note": "sent"}),
+        Action(kind="task_update", args={"task_id": "a", "status": "running"}),
+        Action(kind="task_update", args={"task_id": "zz", "status": "done"}),
+    ]
+    brain = FakeBrain([BrainResult(reply="ok", actions=actions, raw={})])
+    reply = handle_message.run(store, brain, FakeChat(), _CLOCK, "did A", kick=lambda: kicks.append(1))
+    (task,) = store.read_tasks()
+    assert (task.status, task.note, kicks) == ("done", "sent", [1])
+    assert "must be one of" in reply and "no task with id 'zz'" in reply

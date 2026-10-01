@@ -5,15 +5,22 @@ from pathlib import Path
 
 from mentor.domain.actions import BrainTask
 from mentor.domain.settings import ALLOWED, BrainSettings
-from mentor.usecases import add_project, change_settings, send_image
+from mentor.usecases import add_project, change_settings, send_image, task_update
 from mentor.usecases.busy import busy
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "mentor.md"
 
 
-def _dispatch_replan(store, brain, chat, clock, args):
+def _dispatch_replan(services, brain, chat, clock, args):
     replan = importlib.import_module("mentor.usecases.replan")
-    return replan.run(store, brain, chat, clock, args.get("reason", ""))
+    result = replan.run(services.store, brain, chat, clock, args.get("reason", ""))
+    services.kick()  # the worker exits quietly when nothing is ready
+    return result
+
+
+def _dispatch_work(services):
+    services.kick()
+    return "Working on the next task."
 
 
 def _dispatch_scout(store, brain, chat, clock, args):
@@ -24,9 +31,11 @@ def _dispatch_scout(store, brain, chat, clock, args):
 _DISPATCH = {
     "set_settings": lambda s, brain, chat, clock, args: change_settings.run(s.store, args),
     "add_project": lambda s, brain, chat, clock, args: add_project.run(s.store, args),
-    "replan": lambda s, brain, chat, clock, args: _dispatch_replan(s.store, brain, chat, clock, args),
+    "replan": lambda s, brain, chat, clock, args: _dispatch_replan(s, brain, chat, clock, args),
     "scout": lambda s, brain, chat, clock, args: _dispatch_scout(s.store, brain, chat, clock, args),
     "send_image": lambda s, brain, chat, clock, args: send_image.run(s.renderer, chat, args),
+    "work": lambda s, brain, chat, clock, args: _dispatch_work(s),
+    "task_update": lambda s, brain, chat, clock, args: task_update.run(s.store, chat, s.kick, args),
 }
 
 
@@ -55,18 +64,18 @@ def _build_task(store, clock, text: str) -> BrainTask:
 _HEAVY = {"replan", "scout"}
 
 
-def run(store, brain, chat, clock, text: str, message_id: int = 0, renderer=None) -> str:
+def run(store, brain, chat, clock, text: str, message_id: int = 0, renderer=None, kick=lambda: None) -> str:
     store.append_history(f"user: {text}")
     with busy(chat, message_id):
-        reply = _answer(_Services(store, renderer), brain, chat, clock, text, message_id)
+        reply = _answer(_Services(store, renderer, kick), brain, chat, clock, text, message_id)
         store.append_history(f"bot: {reply}")
         chat.send(reply)
     return reply
 
 
 class _Services:
-    def __init__(self, store, renderer):
-        self.store, self.renderer = store, renderer
+    def __init__(self, store, renderer, kick):
+        self.store, self.renderer, self.kick = store, renderer, kick
 
 
 def _answer(services, brain, chat, clock, text: str, message_id: int) -> str:

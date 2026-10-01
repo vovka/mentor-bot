@@ -26,6 +26,8 @@ class BrainTask:
     cwd: str
     write: bool
     settings: BrainSettings
+    timeout: int | None = None
+    extra_dirs: tuple[str, ...] = ()  # more dirs the brain may write to when write=True
 
 
 @dataclass(frozen=True)

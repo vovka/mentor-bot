@@ -3,9 +3,11 @@
 from datetime import date
 from pathlib import Path
 
+from mentor.domain import tasks
 from mentor.domain.actions import BrainTask
 from mentor.domain.settings import BrainSettings
 from mentor.usecases import checkin_state, morning_brief
+from mentor.usecases.replan import current_tasks
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "reconcile.md"
 BUTTONS = [("Approve", "approve"), ("Reject", "reject")]
@@ -20,8 +22,11 @@ def run(store, brain, chat, clock) -> str:
         settings=BrainSettings(**store.read_settings()["heavy"]),
     )
     result = brain.run(task)
-    if not result.document:
+    error = _invalid(result.document)
+    if error or not result.document:
         checkin_state.save(store, None)
+        if error:
+            chat.send(f"Plan proposal discarded: {error}")
         return morning_brief.run(store, brain, chat, clock)
     message_id = chat.send(result.reply, buttons=BUTTONS)
     checkin_state.save(store, {
@@ -29,6 +34,14 @@ def run(store, brain, chat, clock) -> str:
         "proposal": result.reply, "document": result.document,
     })
     return result.reply
+
+
+def _invalid(document: str | None) -> str | None:
+    try:
+        document and tasks.parse(document)
+    except ValueError as e:
+        return str(e)
+    return None
 
 
 def history_since(store, since: str | None) -> str:
@@ -44,6 +57,7 @@ def _build_prompt(store, today) -> str:
     return _PROMPT_PATH.read_text().format_map(
         {
             "today": today.isoformat(),
+            "tasks": current_tasks(store),
             "global_plan": store.read_plan(),
             "timelines": timelines,
             "history": history_since(store, store.read_state().get("last_brief_date")) or "(none)",

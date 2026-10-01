@@ -1,6 +1,6 @@
 import pytest
 
-from mentor.domain.settings import BrainSettings, validate
+from mentor.domain.settings import BrainSettings, tier, validate, work_limits
 
 
 def test_valid_settings():
@@ -16,3 +16,20 @@ def test_unknown_model_raises():
 def test_effort_not_allowed_for_model_raises():
     with pytest.raises(ValueError, match="ultra"):
         validate("codex", "gpt-5.5", "ultra")
+
+
+def test_tier_selects_by_name():
+    raw = {
+        "provider": "codex", "model": "gpt-5.5", "effort": "low",
+        "heavy": {"provider": "codex", "model": "gpt-5.6-sol", "effort": "high"},
+    }
+    assert tier(raw, "chat") == BrainSettings("codex", "gpt-5.5", "low")
+    assert tier(raw, "heavy").model == "gpt-5.6-sol"
+    assert tier(raw, "coder") == BrainSettings("claude", "sonnet", "high")
+    raw["coder"] = {"provider": "codex", "model": "gpt-5.5", "effort": "low"}
+    assert tier(raw, "coder").provider == "codex"
+
+
+def test_work_limits_overlay():
+    assert work_limits({}) == {"daily_runs": 12, "timeout": 1800}
+    assert work_limits({"work": {"timeout": 60}}) == {"daily_runs": 12, "timeout": 60}

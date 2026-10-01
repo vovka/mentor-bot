@@ -1,12 +1,15 @@
 """FileStore: Markdown/JSON persistence under DATA_DIR."""
 
 import json
+import os
 import shutil
 from datetime import date
 from pathlib import Path
 
 from mentor.domain.project import Project
 from mentor.domain.settings import BrainSettings
+from mentor.domain import tasks as task_graph
+from mentor.domain.tasks import Task
 
 DEFAULT_SETTINGS = {
     "provider": "codex",
@@ -69,7 +72,19 @@ class FileStore:
         return json.loads(path.read_text())
 
     def write_state(self, state: dict) -> None:
-        (self.data_dir / "state.json").write_text(json.dumps(state, indent=2))
+        self._atomic_write(self.data_dir / "state.json", json.dumps(state, indent=2))
+
+    def read_tasks(self) -> list[Task]:
+        path = self.data_dir / "tasks.json"
+        return task_graph.parse(path.read_text()) if path.exists() else []
+
+    def write_tasks(self, tasks: list[Task]) -> None:
+        self._atomic_write(self.data_dir / "tasks.json", task_graph.dump(tasks))
+
+    def _atomic_write(self, path: Path, text: str) -> None:
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(text)
+        os.replace(tmp, path)
 
     def _history_path(self, day: date) -> Path:
         return self.data_dir / "history" / f"{day.isoformat()}.md"

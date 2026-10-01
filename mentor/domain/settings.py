@@ -38,3 +38,17 @@ def validate(provider: str, model: str, effort: str) -> BrainSettings:
     if effort not in efforts:
         raise ValueError(f"unknown effort {effort!r} for {provider}/{model}; allowed: {efforts}")
     return BrainSettings(provider=provider, model=model, effort=effort)
+
+
+DEFAULT_CODER = {"provider": "claude", "model": "sonnet", "effort": "high"}
+DEFAULT_WORK = {"daily_runs": 12, "timeout": 1800}
+
+
+def tier(raw: dict, name: str) -> BrainSettings:
+    """chat = top-level provider/model/effort; heavy = raw["heavy"]; coder = raw["coder"] or default."""
+    src = {"chat": raw, "heavy": raw["heavy"], "coder": raw.get("coder", DEFAULT_CODER)}[name]
+    return BrainSettings(src["provider"], src["model"], src["effort"])
+
+
+def work_limits(raw: dict) -> dict:
+    return {**DEFAULT_WORK, **raw.get("work", {})}

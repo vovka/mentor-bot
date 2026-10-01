@@ -1,13 +1,15 @@
-"""Rewrite the global plan via the brain, then keep the pinned Telegram message in sync."""
+"""Rewrite the task graph via the brain, then keep plan.md and the pinned Telegram message in sync."""
 
 from pathlib import Path
 
-from mentor.adapters.store.lock import locked
+from mentor.domain import tasks
 from mentor.domain.actions import BrainTask
 from mentor.domain.settings import BrainSettings
+from mentor.usecases import apply_plan
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "replan.md"
-_PIN_LIMIT = 3800
+
+_NO_TASKS = "(none yet — convert the legacy plan below into tasks)"
 
 
 def run(store, brain, chat, clock, reason: str) -> str:
@@ -20,24 +22,15 @@ def run(store, brain, chat, clock, reason: str) -> str:
     )
     result = brain.run(task)
 
-    summary = result.reply
-    if result.document:
-        store.write_plan(result.document)
-    else:
-        summary = "plan.md unchanged (brain returned no document). " + summary
-
-    sync_pinned(store, chat, last_replan=today.isoformat())
-    return summary
-
-
-def sync_pinned(store, chat, **marks) -> None:
-    """Push plan.md into the pinned message; `marks` are extra state keys set in the same lock."""
-    pinned = _render_pinned(store.read_plan())
-    with locked(store.data_dir):
-        state = store.read_state()
-        _sync_pin(chat, state, pinned)
-        state.update(marks)
-        store.write_state(state)
+    marks = {"last_replan": today.isoformat()}
+    if not result.document:
+        apply_plan.sync_pinned(store, chat, **marks)
+        return "plan unchanged (brain returned no document). " + result.reply
+    error = apply_plan.run(store, chat, result.document, **marks)
+    if error:
+        apply_plan.sync_pinned(store, chat, **marks)
+        return f"Plan not changed: {error}. {result.reply}"
+    return result.reply
 
 
 def _build_prompt(store, today, reason: str) -> str:
@@ -46,6 +39,7 @@ def _build_prompt(store, today, reason: str) -> str:
         {
             "today": today.isoformat(),
             "reason": reason,
+            "tasks": current_tasks(store),
             "global_plan": store.read_plan(),
             "summary": store.read_summary(),
             "history": store.read_recent_history(2),
@@ -61,17 +55,6 @@ def _project_section(project, store) -> str:
     return f"## {project.name}\n\n{project_md}\n\n{timeline}\n\n{plan}"
 
 
-def _render_pinned(plan_text: str) -> str:
-    if len(plan_text) <= _PIN_LIMIT:
-        return plan_text
-    return plan_text[:_PIN_LIMIT] + "\n…see plan.md"
-
-
-def _sync_pin(chat, state: dict, text: str) -> None:
-    pinned_id = state.get("pinned_message_id")
-    if pinned_id:
-        chat.edit(pinned_id, text)
-    else:
-        pinned_id = chat.send(text)
-        chat.pin(pinned_id)
-        state["pinned_message_id"] = pinned_id
+def current_tasks(store) -> str:
+    current = store.read_tasks()
+    return tasks.dump(current) if current else _NO_TASKS

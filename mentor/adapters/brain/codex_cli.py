@@ -1,6 +1,8 @@
 """CodexBrain: runs `codex exec` as a subprocess, parses structured JSON output."""
 
 import json
+import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -9,6 +11,12 @@ from mentor.domain.actions import Action, BrainResult, BrainTask
 
 _TIMEOUT = 180
 _STDIN_THRESHOLD = 100 * 1024  # 100 KB
+PLAYWRIGHT_MCP = "@playwright/mcp@0.0.83"
+
+
+def browser_mcp_command(cdp_url: str) -> tuple[str, list[str]]:
+    """npx command + args for the Playwright MCP server attached to a running Chrome."""
+    return shutil.which("npx") or "npx", ["-y", PLAYWRIGHT_MCP, "--cdp-endpoint", cdp_url]
 
 
 class CodexBrain:
@@ -30,14 +38,18 @@ class CodexBrain:
             stdin_text = task.prompt
         else:
             cmd += ["--", task.prompt]
-        result = subprocess.run(
-            cmd, input=stdin_text, capture_output=True, text=True, timeout=_TIMEOUT
-        )
+        timeout = task.timeout or _TIMEOUT
+        try:
+            result = subprocess.run(
+                cmd, input=stdin_text, capture_output=True, text=True, timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            return BrainResult(reply=f"brain error: timed out after {timeout}s", actions=[], raw={})
         return self._parse(out_path, result)
 
     def _build_cmd(self, task: BrainTask, out_path: Path) -> list[str]:
         sandbox = "workspace-write" if task.write else "read-only"
-        return [
+        cmd = [
             "codex",
             "exec",
             "-o",
@@ -57,6 +69,7 @@ class CodexBrain:
             "--output-schema",
             self._schema_path,
         ]
+        return cmd + _write_flags(task) if task.write else cmd
 
     def _parse(self, out_path: Path, result: subprocess.CompletedProcess) -> BrainResult:
         try:
@@ -68,6 +81,19 @@ class CodexBrain:
         except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError):
             reply = result.stdout.strip() or f"brain error: {result.stderr.strip()[-300:]}"
             return BrainResult(reply=reply, actions=[], raw={"stderr": result.stderr})
+
+
+def _write_flags(task: BrainTask) -> list[str]:
+    flags = ["-c", "sandbox_workspace_write.network_access=true", "-c", "web_search=live"]
+    for d in task.extra_dirs:
+        flags += ["--add-dir", d]
+    if cdp_url := os.environ.get("BROWSER_CDP_URL"):
+        command, args = browser_mcp_command(cdp_url)
+        flags += ["-c", f"mcp_servers.browser.command={json.dumps(command)}"]
+        flags += ["-c", f"mcp_servers.browser.args={json.dumps(args)}"]
+        # approval_policy=never would otherwise auto-deny every MCP tool call
+        flags += ["-c", 'mcp_servers.browser.default_tools_approval_mode="approve"']
+    return flags
 
 
 def _action(item: dict) -> Action:

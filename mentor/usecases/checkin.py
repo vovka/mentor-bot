@@ -1,7 +1,6 @@
 """Check-in buttons (yes/no/approve/reject) and the awaiting-updates hook after a chat message."""
 
-from mentor.usecases import checkin_state, morning_brief, reconcile
-from mentor.usecases.replan import sync_pinned
+from mentor.usecases import apply_plan, checkin_state, morning_brief, reconcile
 
 _AWAIT = "OK, send me your updates by 09:00."
 _ASK_CHANGE = "What should I change instead?"
@@ -35,8 +34,9 @@ def _yes(store, brain, chat, clock, checkin) -> str:
 
 
 def _approve(store, brain, chat, clock, checkin) -> str:
-    store.write_plan(checkin["document"])
-    sync_pinned(store, chat)
+    error = apply_plan.run(store, chat, checkin["document"])
+    if error:
+        chat.send(f"Plan not changed: {error}")
     checkin_state.save(store, None)
     return morning_brief.run(store, brain, chat, clock)
 

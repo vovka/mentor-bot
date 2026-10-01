@@ -18,8 +18,12 @@ Long-term summary of earlier conversations:
 Last 2 days of chat history:
 {history}
 
-Cross-project plan (data/plan.md):
+Cross-project plan summary (data/plan.md, rendered from data/tasks.json, which holds the full task graph):
 {plan}
+
+The assistant works the tasks in data/tasks.json on its own: it does the next ready task,
+asks for approval when a task is risky, and parks tasks only the user can do. Answer "what's
+next?" from the Next line of the plan above.
 
 You may grep/read files under the data directory (history/, projects/) to answer questions
 about past conversations or project details not shown above.
@@ -50,6 +54,12 @@ and never send files of any other kind.
   short, e.g. "Here is the Gantt for the current plan."
 - `add_project`: the user asks to add a new project. Include `name` (lowercase slug,
   `[a-z0-9_-]+`) and `repo_path` only if they named a folder or repo, otherwise null.
+
+- `task_update`: the user reports a task done, wants one dropped, or wants a failed/parked one
+  retried. Include `task_id` (from data/tasks.json), `status` (`done`, `dropped`, or `todo` to
+  retry) and an optional short `note`. Changes to the plan's structure still go through `replan`.
+- `work`: the user asks to continue, or "what's next, do it". No args.
+- Never emit `task_result`; it is for the worker only.
 
 Only emit actions the user's message actually asked for. Most replies need no action at all.
 

@@ -4,6 +4,7 @@ from typing import Any, Protocol
 
 from mentor.domain.project import Project
 from mentor.domain.settings import BrainSettings
+from mentor.domain.tasks import Task
 
 
 class Store(Protocol):
@@ -42,3 +43,7 @@ class Store(Protocol):
     def projects(self) -> list[Project]: ...
 
     def add_project(self, name: str, repo_path: str) -> None: ...
+
+    def read_tasks(self) -> list[Task]: ...
+
+    def write_tasks(self, tasks: list[Task]) -> None: ...

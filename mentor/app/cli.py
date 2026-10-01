@@ -1,4 +1,4 @@
-"""mentor CLI: serve | job {morning,deadline,replan,compact} | doctor."""
+"""mentor CLI: serve | job {morning,deadline,replan,compact,work} | doctor."""
 
 import argparse
 import subprocess
@@ -7,6 +7,7 @@ import time
 
 from mentor.app.config import Config
 from mentor.app.container import build
+from mentor.app.kick import kick
 from mentor.usecases import handle_update
 
 
@@ -16,7 +17,7 @@ def _build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve")
     serve.add_argument("--with-scheduler", action="store_true")
     job = sub.add_parser("job")
-    job.add_argument("name", choices=["morning", "deadline", "replan", "compact"])
+    job.add_argument("name", choices=["morning", "deadline", "replan", "compact", "work"])
     job.add_argument("--dry-run", action="store_true")
     sub.add_parser("doctor")
     return parser
@@ -43,7 +44,7 @@ def _serve(with_scheduler: bool = False) -> None:
             for update in container.chat.poll(offset):
                 handle_update.run(
                     container.store, container.brain, container.chat, container.clock, update,
-                    renderer=container.renderer,
+                    renderer=container.renderer, kick=kick,
                 )
                 offset = update.update_id + 1
         except KeyboardInterrupt:

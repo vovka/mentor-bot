@@ -2,6 +2,7 @@ from datetime import date
 
 from mentor.adapters.store.files import DEFAULT_SETTINGS, FileStore
 from mentor.domain.settings import validate
+from mentor.domain.tasks import Task
 
 
 def test_settings_round_trip_and_default_creation(tmp_path):
@@ -66,3 +67,13 @@ def test_add_project_creates_three_files(tmp_path):
     assert (project_dir / "plan.md").exists()
     assert "jobpilot" in (project_dir / "project.md").read_text()
     assert "/home/vova/dev/jobpilot" in (project_dir / "project.md").read_text()
+
+
+def test_tasks_round_trip_and_missing_file(tmp_path):
+    store = FileStore(tmp_path)
+
+    assert store.read_tasks() == []
+    tasks = [Task("a", "First"), Task("b", "Second", deps=["a"], status="running")]
+    store.write_tasks(tasks)
+    assert store.read_tasks() == tasks
+    assert not list(tmp_path.glob("*.tmp"))
