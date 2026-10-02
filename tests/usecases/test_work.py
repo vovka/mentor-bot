@@ -226,3 +226,11 @@ def test_progress_of_an_ad_hoc_task_replies_to_the_request(tmp_path):
     store, brain, chat = _setup(tmp_path, Task("a", "A", reply_to=42), results=[_result("done")])
     work.run(store, brain, chat, _CLOCK)
     assert chat.replies == {1: 42}
+
+
+def test_cancelled_task_is_failed_but_labelled_cancelled(tmp_path):
+    store, brain, chat = _setup(tmp_path, Task("a", "Research"),
+                                results=[BrainResult(reply="brain error: cancelled", actions=[], raw={})])
+    work.run(store, brain, chat, _CLOCK)
+    assert _status(store) == {"a": "failed"}
+    assert any(text.startswith("⚪ Cancelled: Research") for _, text in chat.html_edits)

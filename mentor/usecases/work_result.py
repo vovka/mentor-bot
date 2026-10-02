@@ -4,6 +4,7 @@ import imaplib
 from pathlib import Path
 
 from mentor.adapters.store.lock import locked
+from mentor.usecases.progress import CANCELLED
 from mentor.usecases.work_brain import other_provider
 
 _MAX_UPLOAD = 50 * 1024 * 1024
@@ -41,7 +42,7 @@ def notify(store, chat, mail, task, args: dict, reply: str, wdir: Path, repo: st
     if outcome in ("done", "needs_user"):
         _hand_off(chat, mail, task, args, reply, wdir, repo, progress)
         return
-    progress.finish(outcome, reply)
+    progress.finish("cancelled" if reply.startswith(CANCELLED) else outcome, reply)
     if outcome == "needs_approval":
         chat.send(f"Approve? {task.title}\n\n{task.proposal}", buttons=_approval_buttons(store, task))
 

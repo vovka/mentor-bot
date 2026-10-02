@@ -12,15 +12,14 @@ _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "ment
 
 
 def _dispatch_replan(services, chat, args):
-    # Pushed after the chat answer is sent, so "🕒 Queued" and any progress land below it.
-    reason = args.get("reason") or ""
+    job, nth = queue.enqueue(services.store, "replan", {"reason": args.get("reason") or ""}, services.message_id)
 
-    def push_and_kick():
-        queue.push(services.store, chat, "replan", {"reason": reason}, services.message_id)
+    def announce_and_kick():  # after the chat answer, so "🕒 Queued" and any progress land below it
+        queue.announce(services.store, chat, job, nth)
         services.kick()
 
-    services.after.append(push_and_kick)
-    return queue.queued_line(services.store, "replan")
+    services.after.append(announce_and_kick)
+    return queue.reply_line("replan", nth)
 
 
 def _dispatch_work(services):
@@ -77,10 +76,19 @@ def run(store, brain, chat, clock, text: str, message_id: int = 0, renderer=None
         services = _Services(store, renderer, kick, message_id)
         reply = _answer(services, brain, chat, clock, text, message_id)
         store.append_history(f"bot: {reply}")
-        chat.send(reply, reply_to=message_id or None)
-        for action in services.after:
-            action()
+        try:
+            chat.send(reply, reply_to=message_id or None)
+        finally:
+            _run_after(services)
     return reply
+
+
+def _run_after(services) -> None:
+    for action in services.after:
+        try:
+            action()
+        except Exception as error:  # one failing follow-up must not stop the others
+            print(f"handle_message: follow-up failed: {error}")
 
 
 class _Services:

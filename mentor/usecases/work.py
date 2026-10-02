@@ -45,14 +45,16 @@ def _drop_exhausted(store, chat) -> None:
     for job in queue.pending(store):
         if job["attempts"] >= 2:
             queue.done(store, job["id"])
-            chat.send(f"Gave up on {queue.LABELS[job['kind']].lower()} after {job['attempts']} attempts.")
+            chat.send(f"Gave up on {queue.LABELS[job['kind']].lower()} after {job['attempts']} attempts.",
+                      reply_to=job.get("reply_to"))
 
 
 def _run_job(store, brain, chat, clock, job) -> None:
     mid = job.get("message_id")
     try:
-        text = replan.run(store, brain, chat, clock, job["args"].get("reason") or "", message_id=mid)
-        chat.send(text, reply_to=job.get("reply_to"))
+        reply_to = job.get("reply_to")
+        text = replan.run(store, brain, chat, clock, job["args"].get("reason") or "", message_id=mid, reply_to=reply_to)
+        chat.send(text, reply_to=reply_to)
     except Exception as error:  # left queued: retried once, then dropped by _drop_exhausted
         print(f"work: job {job['id']} failed: {error}")
         return

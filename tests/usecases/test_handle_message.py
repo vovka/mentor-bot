@@ -152,3 +152,39 @@ def test_add_task_stores_the_requesting_message(tmp_path):
     brain = FakeBrain([BrainResult(reply="ok", actions=[Action("add_task", {"title": "Look"})], raw={})])
     handle_message.run(store, brain, FakeChat(), _CLOCK, "look into it", message_id=42)
     assert store.read_tasks()[0].reply_to == 42
+
+
+def _replan(reason):
+    return Action(kind="replan", args={"reason": reason})
+
+
+def test_two_replans_in_one_reply_are_1st_and_2nd(tmp_path):
+    store, chat = FileStore(tmp_path), FakeChat()
+    brain = FakeBrain([BrainResult(reply="ok", actions=[_replan("a"), _replan("b")], raw={})])
+    reply = handle_message.run(store, brain, chat, _CLOCK, "x", 7)
+    assert "(1st in line)" in reply and "(2nd in line)" in reply
+    assert chat.html_sent == ["🕒 Queued (1st): Replanning", "🕒 Queued (2nd): Replanning"]
+
+
+def test_replan_job_exists_before_add_task_kicks(tmp_path):
+    store, seen = FileStore(tmp_path), []
+    actions = [_replan("a"), Action(kind="add_task", args={"title": "T", "kind": "user"})]
+    brain = FakeBrain([BrainResult(reply="ok", actions=actions, raw={})])
+    handle_message.run(store, brain, FakeChat(), _CLOCK, "x", 7, kick=lambda: seen.append(len(store.read_state()["jobs"])))
+    assert seen and seen[0] == 1
+
+
+def test_failed_chat_send_still_keeps_job_and_attempts_queued_message(tmp_path):
+    store = FileStore(tmp_path)
+
+    class Chat(FakeChat):
+        def send(self, *args, **kwargs):
+            raise OSError("telegram down")
+
+    chat = Chat()
+    brain = FakeBrain([BrainResult(reply="ok", actions=[_replan("a")], raw={})])
+    try:
+        handle_message.run(store, brain, chat, _CLOCK, "x", 7)
+    except OSError:
+        pass
+    assert len(store.read_state()["jobs"]) == 1 and chat.html_sent == ["🕒 Queued (1st): Replanning"]

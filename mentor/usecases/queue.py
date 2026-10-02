@@ -13,26 +13,43 @@ from mentor.adapters.store.lock import locked
 LABELS = {"replan": "Replanning"}
 
 
-def push(store, chat, kind: str, args: dict, reply_to: int | None = None) -> str:
-    """Post the `🕒 Queued (Nth)` message (a reply to `reply_to`), then append the job carrying its id.
-
-    The message goes first so the executor never takes a job without it; Nth is read before, so
-    it may be off by one when two pushes race."""
-    nth = _ordinal(len(pending(store)) + 1)
-    line = f"{LABELS[kind]} queued ({nth} in line)."
-    message_id = chat.send_html(html.escape(f"🕒 Queued ({nth}): {LABELS[kind]}"), reply_to)
-    job = {"id": uuid.uuid4().hex[:8], "kind": kind, "args": args, "attempts": 0, "message_id": message_id,
+def enqueue(store, kind: str, args: dict, reply_to: int | None = None) -> tuple[dict, str]:
+    """Append the job (no message yet) and return it with its ordinal in line, read under the lock."""
+    job = {"id": uuid.uuid4().hex[:8], "kind": kind, "args": args, "attempts": 0, "message_id": None,
            "reply_to": reply_to}
     with locked(store.data_dir):
         state = store.read_state()
         state["jobs"] = state.get("jobs", []) + [job]
         store.write_state(state)
-    return line
+    return job, _ordinal(len(state["jobs"]))
 
 
-def queued_line(store, kind: str) -> str:
-    """What `push` will return if called now, so a reply can announce the job before it is pushed."""
-    return f"{LABELS[kind]} queued ({_ordinal(len(pending(store)) + 1)} in line)."
+def reply_line(kind: str, nth: str) -> str:
+    return f"{LABELS[kind]} queued ({nth} in line)."
+
+
+def announce(store, chat, job: dict, nth: str) -> None:
+    """Post `🕒 Queued (Nth)` (a reply to the job's reply_to) and attach its id to the job, unless the
+    executor already took the job: then its progress message is the status and nothing is posted."""
+    if not _untaken(store, job):
+        return
+    message_id = chat.send_html(html.escape(f"🕒 Queued ({nth}): {LABELS[job['kind']]}"), job["reply_to"])
+    with locked(store.data_dir):
+        state = store.read_state()
+        mine = next((j for j in state.get("jobs", []) if j["id"] == job["id"]), None)
+        if mine and mine["attempts"] == 0 and mine["message_id"] is None:
+            mine["message_id"] = message_id
+            store.write_state(state)
+
+
+def push(store, chat, kind: str, args: dict, reply_to: int | None = None) -> str:
+    job, nth = enqueue(store, kind, args, reply_to)
+    announce(store, chat, job, nth)
+    return reply_line(kind, nth)
+
+
+def _untaken(store, job: dict) -> bool:
+    return any(j["id"] == job["id"] and j["attempts"] == 0 for j in pending(store))
 
 
 def take(store) -> dict | None:

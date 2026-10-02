@@ -89,16 +89,21 @@ def test_add_task_goes_first_and_runs_next(tmp_path):
     assert "/a-2" in brain.tasks[0].cwd
 
 
-def test_job_is_stored_with_its_queued_message_id(tmp_path):
-    store, seen = FileStore(tmp_path), []
+def test_job_is_stored_first_and_gets_the_queued_message_id_after(tmp_path):
+    store = FileStore(tmp_path)
+    job, nth = queue.enqueue(store, "replan", {"reason": "x"}, 9)
+    assert queue.pending(store)[0]["message_id"] is None and nth == "1st"
+    chat = FakeChat()
+    queue.announce(store, chat, job, nth)
+    assert queue.pending(store)[0]["message_id"] == 1 and chat.replies[1] == 9
 
-    class Chat(FakeChat):
-        def send_html(self, text, reply_to=None):
-            seen.append(queue.pending(store))  # the job is appended only after its message exists
-            return super().send_html(text, reply_to)
 
-    queue.push(store, Chat(), "replan", {"reason": "x"})
-    assert seen == [[]] and queue.pending(store)[0]["message_id"] == 1
+def test_announce_is_skipped_once_the_executor_took_the_job(tmp_path):
+    store, chat = FileStore(tmp_path), FakeChat()
+    job, nth = queue.enqueue(store, "replan", {"reason": "x"})
+    queue.take(store)
+    queue.announce(store, chat, job, nth)
+    assert chat.html_sent == []
 
 
 def test_cancel_sends_sigusr1_to_our_executor(tmp_path, monkeypatch):
