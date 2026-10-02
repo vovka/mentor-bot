@@ -9,7 +9,6 @@ from mentor.adapters.brain import stream
 from mentor.adapters.brain.codex_cli import browser_mcp_command
 from mentor.domain.actions import Action, BrainResult, BrainTask
 
-_TIMEOUT = 300
 _READ = ("Read,Grep", "default")
 _WRITE = ("Read,Grep,Glob,Write,Edit,Bash,WebSearch,WebFetch", "acceptEdits")
 
@@ -19,22 +18,20 @@ class ClaudeBrain:
         self._schema = Path(schema_path).read_text()
 
     def run(self, task: BrainTask) -> BrainResult:
-        timeout = task.timeout or _TIMEOUT
         try:
             if task.on_step:
-                result = _stream(self._build_cmd(task), task, timeout)
+                result = _stream(self._build_cmd(task), task)
             else:
                 result = subprocess.run(
                     self._build_cmd(task),
                     input=task.prompt,
                     capture_output=True,
                     text=True,
-                    timeout=timeout,
                     cwd=task.cwd,
                     env=os.environ,
                 )
-        except subprocess.TimeoutExpired:
-            return BrainResult(reply=f"brain error: timed out after {timeout}s", actions=[], raw={})
+        except stream.Aborted as exc:
+            return BrainResult(reply=f"brain error: {exc}", actions=[], raw={})
         return self._parse(result)
 
     def _build_cmd(self, task: BrainTask) -> list[str]:
@@ -86,7 +83,7 @@ class ClaudeBrain:
             )
 
 
-def _stream(cmd: list[str], task: BrainTask, timeout: int) -> subprocess.CompletedProcess:
+def _stream(cmd: list[str], task: BrainTask) -> subprocess.CompletedProcess:
     """stream-json: tool calls become steps; the closing `result` event is the json-mode output."""
     final: list[dict] = []
 
@@ -96,7 +93,7 @@ def _stream(cmd: list[str], task: BrainTask, timeout: int) -> subprocess.Complet
         for line in stream.claude_steps(event):
             task.on_step(line)
 
-    done = stream.run(cmd, task.prompt, timeout, on_event, cwd=task.cwd, env=os.environ)
+    done = stream.run(cmd, task.prompt, on_event, cwd=task.cwd, env=os.environ)
     stdout = json.dumps(final[-1]) if final else ""
     return subprocess.CompletedProcess(cmd, done.returncode, stdout, done.stderr)
 

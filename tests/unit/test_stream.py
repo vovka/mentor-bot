@@ -2,6 +2,7 @@
 
 import json
 import os
+import threading
 from pathlib import Path
 
 from mentor.adapters.brain import stream
@@ -49,9 +50,9 @@ def _fake_cli(tmp_path, monkeypatch, name, body):
     monkeypatch.setenv("PATH", f"{script.parent}{os.pathsep}{os.environ['PATH']}")
 
 
-def _task(tmp_path, provider, steps, timeout=None):
+def _task(tmp_path, provider, steps):
     settings = BrainSettings(provider=provider, model="m", effort="low")
-    return BrainTask("hi", str(tmp_path), True, settings, timeout=timeout, on_step=steps.append)
+    return BrainTask("hi", str(tmp_path), True, settings, on_step=steps.append)
 
 
 def test_codex_streams_steps_and_reads_the_answer_file(tmp_path, monkeypatch):
@@ -73,7 +74,27 @@ def test_claude_streams_steps_and_parses_the_result_event(tmp_path, monkeypatch)
     assert steps == ["edited a.txt", "ran `ls`"]
 
 
-def test_streaming_timeout_kills_the_cli(tmp_path, monkeypatch):
+def test_stall_kills_the_cli(tmp_path, monkeypatch):
+    monkeypatch.setattr(stream, "_STALL", 0.5)
     _fake_cli(tmp_path, monkeypatch, "claude", "sleep 30 & sleep 30")
-    result = ClaudeBrain("prompts/output_schema.json").run(_task(tmp_path, "claude", [], timeout=1))
-    assert result.reply == "brain error: timed out after 1s"
+    result = ClaudeBrain("prompts/output_schema.json").run(_task(tmp_path, "claude", []))
+    assert result.reply == "brain error: stalled (no output for 60 min)"
+
+
+def test_output_resets_the_stall_timer(tmp_path, monkeypatch):
+    monkeypatch.setattr(stream, "_STALL", 1.5)
+    body = f'sleep 1\necho x\nsleep 1\ncat {_FIXTURES / "claude_events.jsonl"}'
+    _fake_cli(tmp_path, monkeypatch, "claude", body)
+    result = ClaudeBrain("prompts/output_schema.json").run(_task(tmp_path, "claude", []))
+    assert result.reply == "made a.txt"
+
+
+def test_cancel_kills_the_running_cli(tmp_path, monkeypatch):
+    _fake_cli(tmp_path, monkeypatch, "codex", "sleep 30 & sleep 30")
+    threading.Timer(0.5, stream.cancel).start()
+    result = CodexBrain("prompts/output_schema.json").run(_task(tmp_path, "codex", []))
+    assert result.reply == "brain error: cancelled"
+
+
+def test_cancel_with_nothing_running_is_a_noop():
+    stream.cancel()

@@ -9,7 +9,6 @@ from mentor.usecases import apply_plan, progress
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "replan.md"
 
-PLAN_TIMEOUT = 900  # removed in step 2
 _NO_TASKS = "(none yet — convert the legacy plan below into tasks)"
 
 
@@ -20,7 +19,6 @@ def run(store, brain, chat, clock, reason: str) -> str:
         cwd=str(store.data_dir),
         write=False,
         settings=tier(store.read_settings(), "plan"),
-        timeout=PLAN_TIMEOUT,
     )
     result = progress.tracked(chat, brain, task, "Replanning", "replan")
 

@@ -109,7 +109,7 @@ def test_tiers_and_provider_override(tmp_path):
                                 Task("o", "Other", provider="claude"), results=[_result("done")] * 3)
     work.run(store, brain, chat, _CLOCK)
     raw = store.read_settings()
-    assert brain.tasks[0].settings.provider == "claude" and brain.tasks[0].timeout == 1800
+    assert brain.tasks[0].settings.provider == "claude"
     assert brain.tasks[1].settings.model == raw["heavy"]["model"]
     assert brain.tasks[2].settings.provider == "claude"
 

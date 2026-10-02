@@ -172,15 +172,15 @@ unprivileged userns. `deploy/apparmor-bwrap` (per-binary profile) lets shell com
 ```mermaid
 flowchart LR
   T[BrainTask] --> CMD["codex exec -o TMP.json -m M -c model_reasoning_effort=E<br/>-s read-only | workspace-write -C CWD --ignore-user-config<br/>--output-schema prompts/output_schema.json -- PROMPT"]
-  CMD -- "stdin closed · 180 s default, work.timeout for the worker" --> TMP[TMP.json]
+  CMD -- "stdin closed · no timeout; streamed runs stall-guard at 60 min of silence" --> TMP[TMP.json]
   TMP --> R[BrainResult] --> DEL[TMP deleted]
-  CMD -- "non-zero / timeout" --> ERR["reply: brain error: <stderr tail>"]
+  CMD -- "non-zero / stalled / cancelled" --> ERR["reply: brain error: <stderr tail>"]
 ```
 
 Streaming: when `BrainTask.on_step` is set (worker, replan, scout), Codex adds `--json` (JSONL events on
 stdout, `-o` still holds the answer) and Claude uses `--output-format stream-json --verbose` (the closing
 `result` event is the json-mode output). `adapters/brain/stream.py` reads stdout line by line, enforces the
-timeout itself (kills the process group) and maps tool calls to short lines ("ran `ls`", "edited a.txt").
+stall guard and cancel() (kill the process group) and maps tool calls to short lines ("ran `ls`", "edited a.txt").
 Unknown or broken events are skipped. Without `on_step` the commands are unchanged.
 
 `--ignore-user-config`: this machine's `~/.codex/config.toml` routes to a local proxy and MCP servers that hang headless.
@@ -254,7 +254,7 @@ flowchart TB
   UT -- yes --> PK["park: awaiting_user<br/>send 'Your turn' + Done button<br/>no brain call, no budget"]
   UT -- no --> BG{"daily runs left?<br/>work.daily_runs"}
   BG -- no --> FIN
-  BG -- yes --> BR["brain run in work dir<br/>tier by kind, timeout work.timeout"]
+  BG -- yes --> BR["brain run in work dir<br/>tier by kind"]
   BR --> OC{"task_result outcome"}
   OC -- done --> T1["finalize progress message + files + email drafts"]
   OC -- needs_user --> T2["send report + files + drafts<br/>+ exact action + Done button"]
@@ -398,7 +398,7 @@ tests/         unit/ usecases/ e2e/     scripts/live_smoke.sh     Dockerfile com
 | personality, rules | `prompts/mentor.md` |
 | a project's deadlines | `data/projects/<name>/timeline.md`, or tell the bot |
 | chat / heavy model | tell the bot (`set_settings`) → `data/settings.json` |
-| coder model, work budget, work timeout | `data/settings.json` `coder`, `work.daily_runs`, `work.timeout` |
+| coder model, work budget | `data/settings.json` `coder`, `work.daily_runs` |
 | what the worker may do alone | `prompts/work.md` (a prompt rule, not enforced) |
 | task kinds, statuses, ordering | `domain/tasks.py` |
 | a task's outcome handling, buttons | `usecases/work_result.py`, `task_buttons.py` |

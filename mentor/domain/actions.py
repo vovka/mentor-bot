@@ -26,7 +26,6 @@ class BrainTask:
     cwd: str
     write: bool
     settings: BrainSettings
-    timeout: int | None = None
     extra_dirs: tuple[str, ...] = ()  # more dirs the brain may write to when write=True
     # set: the adapter streams the CLI's events and reports each step as a short line
     on_step: Callable[[str], None] | None = field(default=None, compare=False)

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from mentor.domain.actions import BrainTask
-from mentor.domain.settings import tier, work_limits
+from mentor.domain.settings import tier
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "work.md"
 _BROWSER = (
@@ -61,7 +61,6 @@ def build(store, clock, task, all_tasks) -> BrainTask:
         cwd=repo if use_repo else str(wdir),
         write=True,
         settings=settings_for(raw, task),
-        timeout=work_limits(raw)["timeout"],
         extra_dirs=(str(wdir),) if use_repo else (),
     )
 

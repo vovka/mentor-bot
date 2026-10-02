@@ -83,7 +83,7 @@ def _after(cmd, flag):
 
 def test_write_mode_cmd(tmp_path, monkeypatch):
     captured = _capture(monkeypatch)
-    task = BrainTask("p", str(tmp_path), True, _SETTINGS, timeout=900, extra_dirs=("/a", "/b"))
+    task = BrainTask("p", str(tmp_path), True, _SETTINGS, extra_dirs=("/a", "/b"))
     ClaudeBrain("prompts/output_schema.json").run(task)
 
     cmd = captured["cmd"]
@@ -91,7 +91,7 @@ def test_write_mode_cmd(tmp_path, monkeypatch):
     assert _after(cmd, "--permission-mode") == "acceptEdits"
     assert _after(cmd, "--permission-prompts") == "none"
     assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "--add-dir"] == [str(tmp_path), "/a", "/b"]
-    assert captured["kwargs"]["timeout"] == 900
+    assert "timeout" not in captured["kwargs"]
 
 
 def test_read_only_cmd_unchanged(tmp_path, monkeypatch):
@@ -100,18 +100,7 @@ def test_read_only_cmd_unchanged(tmp_path, monkeypatch):
     cmd = captured["cmd"]
     assert _after(cmd, "--allowedTools") == "Read,Grep"
     assert _after(cmd, "--permission-mode") == "default"
-    assert captured["kwargs"]["timeout"] == 300
-
-
-def test_timeout_returns_error_result(tmp_path, monkeypatch):
-    def fake_run(cmd, **kwargs):
-        raise subprocess.TimeoutExpired(cmd, 5)
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    task = BrainTask("p", str(tmp_path), False, _SETTINGS, timeout=5)
-    result = ClaudeBrain("prompts/output_schema.json").run(task)
-    assert result.reply == "brain error: timed out after 5s"
-    assert result.actions == []
+    assert "timeout" not in captured["kwargs"]
 
 
 def test_write_mode_attaches_browser_mcp(tmp_path, monkeypatch):

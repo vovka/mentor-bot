@@ -107,7 +107,7 @@ Run them from cron, systemd timers, or `mentor serve --with-scheduler`. See
 
 Chat and heavy model settings live in `data/settings.json` and are changed by chatting.
 `coder` is a third tier with the same fields, used for `coding` and `system` tasks (default
-Claude `sonnet` `high`); `work` sets `daily_runs` (default 12) and `timeout` in seconds (default 1800).
+Claude `sonnet` `high`); `work` sets `daily_runs` (default 12).
 
 ## Tests
 

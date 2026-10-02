@@ -13,19 +13,36 @@ import threading
 from pathlib import Path
 
 
-def run(cmd: list[str], stdin_text: str, timeout: float, on_event, **popen_kw) -> subprocess.CompletedProcess:
-    """Like subprocess.run(capture_output, text, timeout) but feeds each stdout event to `on_event`."""
+# ponytail: fixed silence limit, not configurable; a CLI quiet this long is hung, not thinking
+_STALL = 3600
+_STALLED = "stalled (no output for 60 min)"
+_current: tuple[subprocess.Popen, list[str]] | None = None  # the running CLI and its abort reason
+_lock = threading.Lock()
+
+
+class Aborted(Exception):
+    """The streamed CLI was killed on purpose; str(exc) is the reason."""
+
+
+def run(cmd: list[str], stdin_text: str, on_event, **popen_kw) -> subprocess.CompletedProcess:
+    """Like subprocess.run(capture_output, text) but feeds each stdout event to `on_event`.
+
+    Raises Aborted when `cancel()` is called or the CLI prints nothing for `_STALL` seconds."""
+    global _current
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, start_new_session=True, **popen_kw)
-    timed_out = threading.Event()
-    timer = threading.Timer(timeout, lambda: (timed_out.set(), _kill(proc)))
-    timer.start()
+    reason: list[str] = []
+    with _lock:
+        _current = (proc, reason)
     stderr: list[str] = []
     threads = [threading.Thread(target=_write, args=(proc.stdin, stdin_text), daemon=True),
                threading.Thread(target=lambda: stderr.append(proc.stderr.read()), daemon=True)]
     for t in threads:
         t.start()
+    timer = _arm(proc, reason)
     for line in proc.stdout:
+        timer.cancel()
+        timer = _arm(proc, reason)
         try:
             on_event(json.loads(line))
         except Exception:  # a non-JSON line or an unexpected shape: skip it
@@ -33,9 +50,27 @@ def run(cmd: list[str], stdin_text: str, timeout: float, on_event, **popen_kw) -
     proc.wait()
     timer.cancel()
     threads[1].join()
-    if timed_out.is_set():
-        raise subprocess.TimeoutExpired(cmd, timeout)
+    with _lock:
+        _current = None
+    if reason:
+        raise Aborted(reason[0])
     return subprocess.CompletedProcess(cmd, proc.returncode, "", "".join(stderr))
+
+
+def cancel() -> None:
+    """Kill the streamed CLI running now, if any; its run() raises Aborted("cancelled")."""
+    with _lock:
+        running = _current
+    if running:
+        running[1].append("cancelled")
+        _kill(running[0])
+
+
+def _arm(proc, reason: list[str]) -> threading.Timer:
+    timer = threading.Timer(_STALL, lambda: (reason.append(_STALLED), _kill(proc)))
+    timer.daemon = True
+    timer.start()
+    return timer
 
 
 def _write(pipe, text: str) -> None:

@@ -10,7 +10,6 @@ from pathlib import Path
 from mentor.adapters.brain import stream
 from mentor.domain.actions import Action, BrainResult, BrainTask
 
-_TIMEOUT = 180
 _STDIN_THRESHOLD = 100 * 1024  # 100 KB
 PLAYWRIGHT_MCP = "@playwright/mcp@0.0.83"
 
@@ -39,16 +38,13 @@ class CodexBrain:
             stdin_text = task.prompt
         else:
             cmd += ["--", task.prompt]
-        timeout = task.timeout or _TIMEOUT
         try:
             if task.on_step:
-                result = stream.run(cmd, stdin_text, timeout, lambda e: _report(e, task.on_step))
+                result = stream.run(cmd, stdin_text, lambda e: _report(e, task.on_step))
             else:
-                result = subprocess.run(
-                    cmd, input=stdin_text, capture_output=True, text=True, timeout=timeout
-                )
-        except subprocess.TimeoutExpired:
-            return BrainResult(reply=f"brain error: timed out after {timeout}s", actions=[], raw={})
+                result = subprocess.run(cmd, input=stdin_text, capture_output=True, text=True)
+        except stream.Aborted as exc:
+            return BrainResult(reply=f"brain error: {exc}", actions=[], raw={})
         return self._parse(out_path, result)
 
     def _build_cmd(self, task: BrainTask, out_path: Path) -> list[str]:

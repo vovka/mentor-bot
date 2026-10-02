@@ -35,8 +35,8 @@ def test_tier_selects_by_name():
 
 
 def test_work_limits_overlay():
-    assert work_limits({}) == {"daily_runs": 12, "timeout": 1800}
-    assert work_limits({"work": {"timeout": 60}}) == {"daily_runs": 12, "timeout": 60}
+    assert work_limits({}) == {"daily_runs": 12}
+    assert work_limits({"work": {"daily_runs": 3}}) == {"daily_runs": 3}
 
 
 def test_astra_is_not_allowed():

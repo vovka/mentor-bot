@@ -42,7 +42,7 @@ def validate(provider: str, model: str, effort: str) -> BrainSettings:
 DEFAULT_CODER = {"provider": "claude", "model": "sonnet", "effort": "high"}
 DEFAULT_HEAVY = {"provider": "codex", "model": "gpt-5.6-sol", "effort": "high"}
 DEFAULT_PLAN = {"provider": "codex", "model": "gpt-5.6-sol", "effort": "medium"}
-DEFAULT_WORK = {"daily_runs": 12, "timeout": 1800}
+DEFAULT_WORK = {"daily_runs": 12}
 
 
 def tier(raw: dict, name: str) -> BrainSettings:
