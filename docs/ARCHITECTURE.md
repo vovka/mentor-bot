@@ -1,7 +1,8 @@
 # Mentor assistant bot — architecture
 
 Status 2026-10-02: built, 220 tests, live-tested, running as a systemd user service.
-Published page (snapshot of 2026-09-30, before the task graph and queue; this file is current): https://claude.ai/artifact/Kz2GVi8aQ5SpxxtQVg1HFD
+Published page with the same diagrams (2026-10-02): https://claude.ai/code/artifact/a9610123-72e8-4d25-af88-a33789e7837f
+Older snapshot (2026-09-30, before the task graph and queue): https://claude.ai/artifact/Kz2GVi8aQ5SpxxtQVg1HFD
 
 ## 1. What it is
 
@@ -461,7 +462,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  subgraph "tests/ · 191 · no network"
+  subgraph "tests/ · 220 · no network"
     U[unit: settings · store · markdown] --> UC[usecases: fake brain + fake chat]
     UC --> E2E["e2e: Bot API stub (http.server) + fake brain<br/>full day: chat → settings → replan → morning → compact"]
   end
