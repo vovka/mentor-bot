@@ -12,9 +12,15 @@ _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "ment
 
 
 def _dispatch_replan(services, chat, args):
-    line = queue.push(services.store, chat, "replan", {"reason": args.get("reason") or ""}, services.message_id)
-    services.kick()
-    return line
+    # Pushed after the chat answer is sent, so "🕒 Queued" and any progress land below it.
+    reason = args.get("reason") or ""
+
+    def push_and_kick():
+        queue.push(services.store, chat, "replan", {"reason": reason}, services.message_id)
+        services.kick()
+
+    services.after.append(push_and_kick)
+    return queue.queued_line(services.store, "replan")
 
 
 def _dispatch_work(services):
@@ -68,15 +74,19 @@ _HEAVY = {"scout"}
 def run(store, brain, chat, clock, text: str, message_id: int = 0, renderer=None, kick=lambda: None) -> str:
     store.append_history(f"user: {text}")
     with busy(chat, message_id):
-        reply = _answer(_Services(store, renderer, kick, message_id), brain, chat, clock, text, message_id)
+        services = _Services(store, renderer, kick, message_id)
+        reply = _answer(services, brain, chat, clock, text, message_id)
         store.append_history(f"bot: {reply}")
         chat.send(reply, reply_to=message_id or None)
+        for action in services.after:
+            action()
     return reply
 
 
 class _Services:
     def __init__(self, store, renderer, kick, message_id=0):
         self.store, self.renderer, self.kick = store, renderer, kick
+        self.after: list = []  # run once the chat answer is sent
         self.message_id = message_id or None  # the user's message: replies and queued work quote it
 
 

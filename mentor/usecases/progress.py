@@ -15,7 +15,7 @@ LIMIT = 4096  # Telegram's message length
 _STEP_MAX = 200
 _STATUS = {
     "done": "✅ Done", "needs_user": "🟡 Prepared", "needs_approval": "🟠 Needs approval",
-    "failed": "❌ Failed", "dropped": "⚪ Dropped meanwhile",
+    "failed": "❌ Failed", "dropped": "⚪ Dropped meanwhile", "cancelled": "⚪ Cancelled",
 }
 
 
@@ -96,8 +96,17 @@ def tracked(chat, brain, task, title: str, kind: str, message_id: int | None = N
     except BaseException:
         progress.finish("failed")
         raise
-    progress.finish("failed" if result.reply.startswith("brain error") else "done")
+    progress.finish(_outcome(result.reply))
     return result
+
+
+CANCELLED = "brain error: cancelled"
+
+
+def _outcome(reply: str) -> str:
+    if reply.startswith(CANCELLED):
+        return "cancelled"
+    return "failed" if reply.startswith("brain error") else "done"
 
 
 def _fit(steps: list[str], room: int, mark: str) -> str:

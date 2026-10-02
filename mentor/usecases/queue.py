@@ -19,6 +19,7 @@ def push(store, chat, kind: str, args: dict, reply_to: int | None = None) -> str
     The message goes first so the executor never takes a job without it; Nth is read before, so
     it may be off by one when two pushes race."""
     nth = _ordinal(len(pending(store)) + 1)
+    line = f"{LABELS[kind]} queued ({nth} in line)."
     message_id = chat.send_html(html.escape(f"🕒 Queued ({nth}): {LABELS[kind]}"), reply_to)
     job = {"id": uuid.uuid4().hex[:8], "kind": kind, "args": args, "attempts": 0, "message_id": message_id,
            "reply_to": reply_to}
@@ -26,7 +27,12 @@ def push(store, chat, kind: str, args: dict, reply_to: int | None = None) -> str
         state = store.read_state()
         state["jobs"] = state.get("jobs", []) + [job]
         store.write_state(state)
-    return f"{LABELS[kind]} queued ({nth} in line)."
+    return line
+
+
+def queued_line(store, kind: str) -> str:
+    """What `push` will return if called now, so a reply can announce the job before it is pushed."""
+    return f"{LABELS[kind]} queued ({_ordinal(len(pending(store)) + 1)} in line)."
 
 
 def take(store) -> dict | None:

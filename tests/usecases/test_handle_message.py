@@ -62,7 +62,8 @@ def test_replan_action_queues_a_job_and_kicks(tmp_path):
     jobs = store.read_state()["jobs"]
     assert [(j["kind"], j["args"]) for j in jobs] == [("replan", {"reason": "move demo to Friday"})]
     assert "Replanning queued (1st in line)." in reply and kicks == [1] and len(brain.tasks) == 1
-    assert chat.html_sent == ["🕒 Queued (1st): Replanning"] and jobs[0]["message_id"] == 1
+    assert chat.html_sent == ["🕒 Queued (1st): Replanning"] and jobs[0]["message_id"] == 2
+    assert chat.outbox == [reply]  # the answer (id 1) goes out before the queued message (id 2)
 
 
 def test_add_task_action_inserts_at_top_and_kicks(tmp_path):

@@ -108,3 +108,9 @@ def test_ops_document_patches_existing_tasks(tmp_path):
     assert [(t.id, t.due) for t in store.read_tasks()] == [("p-0", ""), ("p-1", "2026-10-05")]
     assert "p-1 | todo | research |  |  | deps= | move me" in brain.tasks[0].prompt
     assert brain.tasks[0].settings.model == "gpt-5.6-sol" and brain.tasks[0].settings.effort == "medium"
+
+
+def test_brain_error_is_readable(tmp_path):
+    summary = replan.run(FileStore(tmp_path), _DocBrain(None, "brain error: boom"), FakeChat(),
+                         FixedClock(datetime(2026, 9, 29)), reason="x")
+    assert summary == "Replan failed: boom; plan unchanged."

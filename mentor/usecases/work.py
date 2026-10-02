@@ -51,7 +51,8 @@ def _drop_exhausted(store, chat) -> None:
 def _run_job(store, brain, chat, clock, job) -> None:
     mid = job.get("message_id")
     try:
-        chat.send(replan.run(store, brain, chat, clock, job["args"].get("reason") or "", message_id=mid))
+        text = replan.run(store, brain, chat, clock, job["args"].get("reason") or "", message_id=mid)
+        chat.send(text, reply_to=job.get("reply_to"))
     except Exception as error:  # left queued: retried once, then dropped by _drop_exhausted
         print(f"work: job {job['id']} failed: {error}")
         return

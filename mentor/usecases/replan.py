@@ -25,12 +25,20 @@ def run(store, brain, chat, clock, reason: str, message_id: int | None = None) -
     marks = {"last_replan": today.isoformat()}
     if not result.document:
         apply_plan.sync_pinned(store, chat, **marks)
-        return "plan unchanged (brain returned no document). " + result.reply
+        return _no_document(result.reply)
     error = apply_plan.run(store, chat, result.document, **marks)
     if error:
         apply_plan.sync_pinned(store, chat, **marks)
         return f"Plan not changed: {error}. {result.reply}"
     return result.reply
+
+
+def _no_document(reply: str) -> str:
+    if reply.startswith(progress.CANCELLED):
+        return "Replan cancelled; plan unchanged."
+    if reply.startswith("brain error"):
+        return f"Replan failed: {reply.removeprefix('brain error:').strip()}; plan unchanged."
+    return "plan unchanged (brain returned no document). " + reply
 
 
 def _build_prompt(store, today, reason: str) -> str:

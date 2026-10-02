@@ -41,7 +41,7 @@ def test_take_increments_attempts_and_keeps_the_job_until_done(tmp_path):
 def test_executor_runs_queued_replan_first_in_the_queued_message(tmp_path):
     store, chat = FileStore(tmp_path), FakeChat()
     store.write_tasks([Task("a", "A")])
-    queue.push(store, chat, "replan", {"reason": "move A"})
+    queue.push(store, chat, "replan", {"reason": "move A"}, reply_to=77)
     brain = FakeBrain([_replanned("a", "b"), _DONE, _DONE])
     work.run(store, brain, chat, _CLOCK)
     assert not brain.tasks[0].write and "move A" in brain.tasks[0].prompt
@@ -49,6 +49,16 @@ def test_executor_runs_queued_replan_first_in_the_queued_message(tmp_path):
     on_queued = [text for mid, text in chat.html_edits if mid == 1]
     assert on_queued[0].startswith("⏳ Replanning") and on_queued[-1].startswith("✅ Done: Replanning")
     assert "replanned" in chat.outbox and queue.pending(store) == []
+    assert chat.replies[1] == 77 and chat.replies[max(chat.replies)] == 77
+
+
+def test_cancelled_replan_replies_briefly_and_marks_progress_cancelled(tmp_path):
+    store, chat = FileStore(tmp_path), FakeChat()
+    queue.push(store, chat, "replan", {"reason": "x"}, reply_to=5)
+    work.run(store, FakeBrain([BrainResult(reply="brain error: cancelled", actions=[], raw={})]), chat, _CLOCK)
+    assert chat.outbox[-1] == "Replan cancelled; plan unchanged."
+    assert chat.html_edits[-1][1].startswith("⚪ Cancelled: Replanning")
+    assert chat.replies[max(chat.replies)] == 5
 
 
 def test_job_taken_twice_is_dropped_with_a_message(tmp_path):
