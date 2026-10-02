@@ -9,15 +9,24 @@ from mentor.usecases import checkin, handle_message, task_buttons
 
 
 def run(store, brain, chat, clock, update: Update, renderer=None, kick=lambda: None) -> None:
+    if claim(store, update):
+        route(store, brain, chat, clock, update, renderer, kick)
+
+
+def claim(store, update: Update) -> bool:
+    """Dedup by update_id; False for a replayed update. Serve calls this in poll order, before the thread."""
     with locked(store.data_dir):
         state = store.read_state()
         if update.update_id <= state.get("last_update_id", 0):
-            return
+            return False
         state["last_update_id"] = update.update_id
         store.write_state(state)
+        return True
 
+
+def route(store, brain, chat, clock, update: Update, renderer=None, kick=lambda: None) -> None:
     if update.text.strip() == "/cancel":
-        chat.send(_cancel(state.get("executor_pid")))
+        chat.send(_cancel(store.read_state().get("executor_pid")), reply_to=update.message_id)
         return
     if update.callback_data.startswith("t:"):
         task_buttons.on_button(store, chat, update, kick)

@@ -220,3 +220,9 @@ def test_progress_message_is_sent_once_then_edited_to_the_outcome(tmp_path):
     (msg_id, final), = chat.html_edits
     assert msg_id == 1 and final.startswith("✅ Done: Research") and final.endswith("</blockquote>\nfound it")
     assert "ran `ls`" in (tmp_path / "work" / "a" / "steps.md").read_text()
+
+
+def test_progress_of_an_ad_hoc_task_replies_to_the_request(tmp_path):
+    store, brain, chat = _setup(tmp_path, Task("a", "A", reply_to=42), results=[_result("done")])
+    work.run(store, brain, chat, _CLOCK)
+    assert chat.replies == {1: 42}

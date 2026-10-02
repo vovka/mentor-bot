@@ -136,3 +136,18 @@ def test_task_update_action(tmp_path):
     (task,) = store.read_tasks()
     assert (task.status, task.note, kicks) == ("done", "sent", [1])
     assert "must be one of" in reply and "no task with id 'zz'" in reply
+
+
+def test_reply_quotes_the_users_message_and_queued_job_replies_too(tmp_path):
+    store, chat = FileStore(tmp_path), FakeChat()
+    brain = FakeBrain([BrainResult(reply="on it", actions=[Action("replan", {"reason": "x"})], raw={})])
+    handle_message.run(store, brain, chat, _CLOCK, "replan please", message_id=42)
+    assert chat.replies == {1: 42, 2: 42}  # 1 = queued message, 2 = the answer
+    assert store.read_state()["jobs"][0]["reply_to"] == 42
+
+
+def test_add_task_stores_the_requesting_message(tmp_path):
+    store = FileStore(tmp_path)
+    brain = FakeBrain([BrainResult(reply="ok", actions=[Action("add_task", {"title": "Look"})], raw={})])
+    handle_message.run(store, brain, FakeChat(), _CLOCK, "look into it", message_id=42)
+    assert store.read_tasks()[0].reply_to == 42

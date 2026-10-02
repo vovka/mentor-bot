@@ -40,19 +40,23 @@ def _loads(document: str) -> dict:
 
 
 def refresh(store, chat, **marks) -> None:
-    """Re-render plan.md from tasks.json and sync the pin; call after every status change."""
-    store.write_plan(tasks.render(store.read_tasks()))
-    sync_pinned(store, chat, **marks)
+    """Re-render plan.md from tasks.json and sync the pin in one locked step; the caller must not hold the lock."""
+    with locked(store.data_dir):
+        store.write_plan(tasks.render(store.read_tasks()))
+        _sync_pinned(store, chat, marks)
 
 
 def sync_pinned(store, chat, **marks) -> None:
     """Push plan.md into the pinned message; `marks` are extra state keys set in the same lock."""
-    pinned = _render_pinned(store.read_plan())
     with locked(store.data_dir):
-        state = store.read_state()
-        _sync_pin(chat, state, pinned)
-        state.update(marks)
-        store.write_state(state)
+        _sync_pinned(store, chat, marks)
+
+
+def _sync_pinned(store, chat, marks: dict) -> None:
+    state = store.read_state()
+    _sync_pin(chat, state, _render_pinned(store.read_plan()))
+    state.update(marks)
+    store.write_state(state)
 
 
 def _render_pinned(plan_text: str) -> str:

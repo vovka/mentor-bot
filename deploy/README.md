@@ -16,6 +16,10 @@
 itself after button presses, `work` and `task_update` chat actions, replan and the morning job;
 only one worker runs at a time (`data/.work.lock`), and a second start exits at once.
 
+`mentor.service` uses `KillMode=process`: a restart stops only `mentor serve` (it waits up to
+`TimeoutStopSec=300` for in-flight messages), while a running executor survives and keeps the old
+code until it exits. The new `serve` kicks the executor on startup to drain leftover jobs.
+
 Worker logs: a worker started by the bot writes to `data/work.log`; a run from the timer goes to
 the journal (`journalctl --user -u mentor-work`); cron appends to `data/jobs.log`.
 

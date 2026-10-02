@@ -7,7 +7,7 @@ from mentor.domain import tasks
 from mentor.usecases import apply_plan
 
 
-def run(store, chat, kick, args: dict) -> str:
+def run(store, chat, kick, args: dict, reply_to: int | None = None) -> str:
     title = (args.get("title") or "").strip()
     if not title:
         return "Task not added: it needs a title."
@@ -15,7 +15,7 @@ def run(store, chat, kick, args: dict) -> str:
     with locked(store.data_dir):
         all_tasks = store.read_tasks()
         task = tasks.Task(_new_id(title, {t.id for t in all_tasks}), title, project=args.get("project") or "",
-                          kind=kind, note=args.get("note") or "")
+                          kind=kind, note=args.get("note") or "", reply_to=reply_to or 0)
         store.write_tasks([task, *all_tasks])
     apply_plan.refresh(store, chat)
     kick()

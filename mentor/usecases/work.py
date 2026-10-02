@@ -105,7 +105,8 @@ def _park(store, chat, task) -> str:
 def _work(store, brain, chat, clock, mail, task) -> str:
     brain_task = work_brain.build(store, clock, task, store.read_tasks())
     wdir = work_brain.work_dir(store, task)
-    progress = Progress(chat, task.title, model_line(task.kind, brain_task.settings), wdir / "steps.md")
+    progress = Progress(chat, task.title, model_line(task.kind, brain_task.settings), wdir / "steps.md",
+                        reply_to=task.reply_to or None)
     progress.start()
     try:
         result = brain.run(replace(brain_task, on_step=progress.step))

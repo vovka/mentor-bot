@@ -6,6 +6,7 @@ import shutil
 from datetime import date
 from pathlib import Path
 
+from mentor.adapters.store.lock import locked
 from mentor.domain.project import Project
 from mentor.domain.settings import BrainSettings
 from mentor.domain import tasks as task_graph
@@ -93,7 +94,8 @@ class FileStore:
         return self.data_dir / "history" / f"{day.isoformat()}.md"
 
     def append_history(self, text: str) -> None:
-        with open(self._history_path(date.today()), "a") as f:
+        """Under the data lock: chat threads and the executor append concurrently. Caller must not hold it."""
+        with locked(self.data_dir), open(self._history_path(date.today()), "a") as f:
             f.write(text + "\n")
 
     def read_history(self, day: date) -> str:

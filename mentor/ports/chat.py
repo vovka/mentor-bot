@@ -4,8 +4,8 @@ from mentor.domain.conversation import Update
 
 
 class Chat(Protocol):
-    def send(self, text: str, buttons: list[tuple[str, str]] | None = None) -> int:
-        """Send text; buttons = [(label, callback_data)] become one inline keyboard row."""
+    def send(self, text: str, buttons: list[tuple[str, str]] | None = None, reply_to: int | None = None) -> int:
+        """Send text; buttons = [(label, callback_data)] become one inline keyboard row; reply_to quotes a message."""
 
     def answer_callback(self, callback_id: str) -> None: ...
 
@@ -17,7 +17,7 @@ class Chat(Protocol):
 
     def edit(self, id: int, text: str) -> None: ...
 
-    def send_html(self, text: str) -> int:
+    def send_html(self, text: str, reply_to: int | None = None) -> int:
         """One HTML-formatted message (parse_mode HTML, no chunking); text must fit 4096 chars."""
 
     def edit_html(self, id: int, text: str) -> None: ...

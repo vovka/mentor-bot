@@ -18,9 +18,11 @@ def run(store, brain, chat, clock, dry_run: bool = False) -> str:
     if dry_run:
         return reply
 
-    chat.send(reply)
     with locked(store.data_dir):
         state = store.read_state()
+        if state.get("last_brief_date") == today.isoformat():  # another process sent it while we asked
+            return "already sent"
+        chat.send(reply)
         state["last_brief_date"] = today.isoformat()
         store.write_state(state)
     return reply

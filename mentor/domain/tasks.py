@@ -7,7 +7,7 @@ from graphlib import CycleError, TopologicalSorter
 
 KINDS = ("research", "writing", "coding", "system", "user")
 STATUSES = ("todo", "running", "awaiting_approval", "awaiting_user", "done", "failed", "dropped")
-RUNTIME = ("files", "approved", "provider", "proposal")
+RUNTIME = ("files", "approved", "provider", "proposal", "reply_to")
 _ID = re.compile(r"[A-Za-z0-9_-]{1,48}")  # ids travel in Telegram callback data (64 bytes, `:`-separated)
 
 
@@ -25,6 +25,7 @@ class Task:
     approved: bool = False
     provider: str = ""
     proposal: str = ""
+    reply_to: int = 0  # chat message that asked for this task; its progress message replies to it
 
 
 def parse(text: str) -> list[Task]:

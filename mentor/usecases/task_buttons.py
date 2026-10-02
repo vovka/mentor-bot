@@ -13,10 +13,10 @@ def on_button(store, chat, update, kick) -> str:
     chat.clear_buttons(update.message_id)
     _, task_id, verb = update.callback_data.split(":", 2)
     if not _claim(store, task_id, verb):
-        chat.send("Already handled.")
+        chat.send("Already handled.", reply_to=update.message_id)
         return "stale"
     if verb == "no":
-        chat.send(_ASK_INSTEAD)
+        chat.send(_ASK_INSTEAD, reply_to=update.message_id)
     apply_plan.refresh(store, chat)
     if verb != "no":
         kick()

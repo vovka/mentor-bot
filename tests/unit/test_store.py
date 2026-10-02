@@ -77,3 +77,21 @@ def test_tasks_round_trip_and_missing_file(tmp_path):
     store.write_tasks(tasks)
     assert store.read_tasks() == tasks
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_append_history_writes_under_the_data_lock(tmp_path, monkeypatch):
+    import contextlib
+    from datetime import date as _date
+
+    from mentor.adapters.store import files
+
+    store, seen = files.FileStore(tmp_path), []
+
+    @contextlib.contextmanager
+    def spy(data_dir, name=".lock"):
+        yield
+        seen.append(store.read_history(_date.today()))  # still inside the lock
+
+    monkeypatch.setattr(files, "locked", spy)
+    store.append_history("user: hi")
+    assert seen == ["user: hi\n"]

@@ -8,6 +8,9 @@ WorkingDirectory=%h/dev/mentor-bot
 EnvironmentFile=%h/dev/mentor-bot/.env
 ExecStart=%h/dev/mentor-bot/.venv/bin/mentor serve
 Restart=always
+# the kicked `mentor job work` executor outlives a restart; give handler threads time to finish
+KillMode=process
+TimeoutStopSec=300
 
 [Install]
 WantedBy=default.target

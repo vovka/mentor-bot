@@ -1,9 +1,10 @@
 """mentor CLI: serve | job {morning,deadline,replan,compact,work} | doctor."""
 
 import argparse
+import signal
 import subprocess
 import sys
-import time
+import threading
 
 from mentor.app.config import Config
 from mentor.app.container import build
@@ -24,8 +25,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _start_scheduler(container) -> None:
-    import threading
-
     from mentor.adapters.scheduler.inprocess import Scheduler, load_schedule
     from mentor.app import jobs
 
@@ -38,20 +37,47 @@ def _serve(with_scheduler: bool = False) -> None:
     container = build(Config.from_env())
     if with_scheduler:
         _start_scheduler(container)
+    stop = threading.Event()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda *_: stop.set())
+    kick()  # drain jobs and tasks left over from before a restart
+    serve_loop(container, stop)
+
+
+def serve_loop(container, stop: threading.Event, kick=kick) -> None:
+    """Long-poll until `stop`; each update runs in its own thread so a slow answer never blocks the chat."""
     offset = container.store.read_state().get("last_update_id", 0) + 1
-    while True:
+    threads: list[threading.Thread] = []
+    while not stop.is_set():
         try:
             for update in container.chat.poll(offset):
-                handle_update.run(
-                    container.store, container.brain, container.chat, container.clock, update,
-                    renderer=container.renderer, kick=kick,
-                )
                 offset = update.update_id + 1
-        except KeyboardInterrupt:
-            return
+                threads = [t for t in threads if t.is_alive()] + dispatch(container, update, kick)
         except Exception as exc:  # long-poll loop must survive transient errors
             print(f"serve error: {exc}", file=sys.stderr)
-            time.sleep(1)
+            stop.wait(1)
+    for thread in threads:
+        thread.join()
+
+
+def dispatch(container, update, kick=kick) -> list[threading.Thread]:
+    """Dedup in poll order, then handle the update in a new non-daemon thread (shutdown waits for it)."""
+    # ponytail: one unbounded thread per update; fine for one user, add a pool if updates ever flood in
+    if not handle_update.claim(container.store, update):
+        return []
+    thread = threading.Thread(target=_handle, args=(container, update, kick))
+    thread.start()
+    return [thread]
+
+
+def _handle(container, update, kick) -> None:
+    try:
+        handle_update.route(
+            container.store, container.brain, container.chat, container.clock, update,
+            renderer=container.renderer, kick=kick,
+        )
+    except Exception as exc:  # one failed update must not take the others down
+        print(f"serve error: update {update.update_id}: {exc}", file=sys.stderr)
 
 
 def _doctor() -> None:

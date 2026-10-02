@@ -1,6 +1,6 @@
 """Durable job queue in state.json["jobs"]: plan-changing work the single executor drains in order.
 
-A job is {id, kind, args, attempts, message_id}; kinds: replan {reason}, reconcile {}.
+A job is {id, kind, args, attempts, message_id, reply_to}; kinds: replan {reason}, reconcile {}.
 `attempts` counts takes, so a job that crashed the executor twice gets dropped instead of looping.
 """
 
@@ -12,15 +12,16 @@ from mentor.adapters.store.lock import locked
 LABELS = {"replan": "Replanning", "reconcile": "Reconciling the plan"}
 
 
-def push(store, chat, kind: str, args: dict) -> str:
-    """Append a job, post its `🕒 Queued (Nth)` message, return a human line for the reply."""
-    job = {"id": uuid.uuid4().hex[:8], "kind": kind, "args": args, "attempts": 0, "message_id": None}
+def push(store, chat, kind: str, args: dict, reply_to: int | None = None) -> str:
+    """Append a job, post its `🕒 Queued (Nth)` message (a reply to `reply_to`), return a human line."""
+    job = {"id": uuid.uuid4().hex[:8], "kind": kind, "args": args, "attempts": 0, "message_id": None,
+           "reply_to": reply_to}
     with locked(store.data_dir):
         state = store.read_state()
         state["jobs"] = state.get("jobs", []) + [job]
         store.write_state(state)
         nth = _ordinal(len(state["jobs"]))
-    message_id = chat.send_html(html.escape(f"🕒 Queued ({nth}): {LABELS[kind]}"))
+    message_id = chat.send_html(html.escape(f"🕒 Queued ({nth}): {LABELS[kind]}"), reply_to)
     _update(store, job["id"], message_id=message_id)
     return f"{LABELS[kind]} queued ({nth} in line)."
 

@@ -32,11 +32,11 @@ class TelegramChat:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())
 
-    def send(self, text: str, buttons: list[tuple[str, str]] | None = None) -> int:
+    def send(self, text: str, buttons: list[tuple[str, str]] | None = None, reply_to: int | None = None) -> int:
         parts = chunk(text)
         msg_id = 0
         for i, part in enumerate(parts):
-            params = {"chat_id": self._chat_id, "text": part}
+            params = {"chat_id": self._chat_id, "text": part, **_reply(reply_to if i == 0 else None)}
             if buttons and i == len(parts) - 1:
                 row = [{"text": label, "callback_data": data} for label, data in buttons]
                 params["reply_markup"] = {"inline_keyboard": [row]}
@@ -67,8 +67,8 @@ class TelegramChat:
     def edit(self, id: int, text: str) -> None:
         self._edit({"chat_id": self._chat_id, "message_id": id, "text": text})
 
-    def send_html(self, text: str) -> int:
-        params = {"chat_id": self._chat_id, "text": text, "parse_mode": "HTML"}
+    def send_html(self, text: str, reply_to: int | None = None) -> int:
+        params = {"chat_id": self._chat_id, "text": text, "parse_mode": "HTML", **_reply(reply_to)}
         return self._call("sendMessage", params, _CALL_TIMEOUT)["result"]["message_id"]
 
     def edit_html(self, id: int, text: str) -> None:
@@ -141,6 +141,13 @@ class TelegramChat:
             callback_data=query.get("data", ""),
             callback_id=query["id"],
         )
+
+
+def _reply(reply_to: int | None) -> dict:
+    """A real Telegram reply; still sent when the quoted message is gone."""
+    if not reply_to:
+        return {}
+    return {"reply_parameters": {"message_id": reply_to, "allow_sending_without_reply": True}}
 
 
 def _multipart(

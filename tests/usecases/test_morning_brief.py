@@ -34,3 +34,16 @@ def test_dry_run_sends_nothing_and_does_not_mark_state(tmp_path):
     assert result == "draft brief"
     assert chat.outbox == []
     assert store.read_state().get("last_brief_date") is None
+
+
+def test_no_duplicate_when_another_process_sent_it_meanwhile(tmp_path):
+    store, chat = FileStore(tmp_path), FakeChat()
+    clock = FixedClock(datetime(2026, 9, 29, 8, 0))
+
+    class RacingBrain:
+        def run(self, task):
+            store.write_state({"last_brief_date": "2026-09-29"})  # the other process finished first
+            return BrainResult(reply="good morning", actions=[], raw={})
+
+    assert morning_brief.run(store, RacingBrain(), chat, clock) == "already sent"
+    assert chat.outbox == []

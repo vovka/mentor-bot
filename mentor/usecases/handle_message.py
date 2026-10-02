@@ -12,7 +12,7 @@ _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "ment
 
 
 def _dispatch_replan(services, chat, args):
-    line = queue.push(services.store, chat, "replan", {"reason": args.get("reason") or ""})
+    line = queue.push(services.store, chat, "replan", {"reason": args.get("reason") or ""}, services.message_id)
     services.kick()
     return line
 
@@ -22,17 +22,17 @@ def _dispatch_work(services):
     return "Working on the next task."
 
 
-def _dispatch_scout(store, brain, chat, clock, args):
+def _dispatch_scout(services, brain, chat, args):
     scout = importlib.import_module("mentor.usecases.scout")
-    return scout.run(store, brain, chat, args.get("project", ""), args.get("question", ""))
+    return scout.run(services.store, brain, chat, args.get("project", ""), args.get("question", ""), services.message_id)
 
 
 _DISPATCH = {
     "set_settings": lambda s, brain, chat, clock, args: change_settings.run(s.store, args),
     "add_project": lambda s, brain, chat, clock, args: add_project.run(s.store, args),
     "replan": lambda s, brain, chat, clock, args: _dispatch_replan(s, chat, args),
-    "add_task": lambda s, brain, chat, clock, args: add_task.run(s.store, chat, s.kick, args),
-    "scout": lambda s, brain, chat, clock, args: _dispatch_scout(s.store, brain, chat, clock, args),
+    "add_task": lambda s, brain, chat, clock, args: add_task.run(s.store, chat, s.kick, args, s.message_id),
+    "scout": lambda s, brain, chat, clock, args: _dispatch_scout(s, brain, chat, args),
     "send_image": lambda s, brain, chat, clock, args: send_image.run(s.renderer, chat, args),
     "work": lambda s, brain, chat, clock, args: _dispatch_work(s),
     "task_update": lambda s, brain, chat, clock, args: task_update.run(s.store, chat, s.kick, args),
@@ -68,15 +68,16 @@ _HEAVY = {"scout"}
 def run(store, brain, chat, clock, text: str, message_id: int = 0, renderer=None, kick=lambda: None) -> str:
     store.append_history(f"user: {text}")
     with busy(chat, message_id):
-        reply = _answer(_Services(store, renderer, kick), brain, chat, clock, text, message_id)
+        reply = _answer(_Services(store, renderer, kick, message_id), brain, chat, clock, text, message_id)
         store.append_history(f"bot: {reply}")
-        chat.send(reply)
+        chat.send(reply, reply_to=message_id or None)
     return reply
 
 
 class _Services:
-    def __init__(self, store, renderer, kick):
+    def __init__(self, store, renderer, kick, message_id=0):
         self.store, self.renderer, self.kick = store, renderer, kick
+        self.message_id = message_id or None  # the user's message: replies and queued work quote it
 
 
 def _answer(services, brain, chat, clock, text: str, message_id: int) -> str:

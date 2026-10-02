@@ -1,5 +1,7 @@
 """Test double for Chat: in-memory outbox, no network."""
 
+import threading
+
 from mentor.domain.conversation import Update
 
 
@@ -18,12 +20,21 @@ class FakeChat:
         self.answered: list[str] = []
         self.cleared: list[int] = []
         self._updates = list(updates or [])
+        self.replies: dict[int, int] = {}  # message id -> id of the message it replies to
         self._next_id = 1
+        self._ids = threading.Lock()  # handler threads send concurrently
 
-    def send(self, text: str, buttons: list[tuple[str, str]] | None = None) -> int:
+    def _new_id(self, reply_to: int | None) -> int:
+        with self._ids:
+            msg_id = self._next_id
+            self._next_id += 1
+        if reply_to:
+            self.replies[msg_id] = reply_to
+        return msg_id
+
+    def send(self, text: str, buttons: list[tuple[str, str]] | None = None, reply_to: int | None = None) -> int:
         self.outbox.append(text)
-        msg_id = self._next_id
-        self._next_id += 1
+        msg_id = self._new_id(reply_to)
         if buttons:
             self.buttons[msg_id] = buttons
         return msg_id
@@ -45,11 +56,9 @@ class FakeChat:
     def edit(self, id: int, text: str) -> None:
         self.edits.append((id, text))
 
-    def send_html(self, text: str) -> int:
+    def send_html(self, text: str, reply_to: int | None = None) -> int:
         self.html_sent.append(text)
-        msg_id = self._next_id
-        self._next_id += 1
-        return msg_id
+        return self._new_id(reply_to)
 
     def edit_html(self, id: int, text: str) -> None:
         self.html_edits.append((id, text))
