@@ -1,6 +1,6 @@
 # Mentor assistant bot — architecture
 
-Status 2026-10-02: built, 143 tests, live-tested, running as a systemd user service.
+Status 2026-10-02: built, 191 tests, live-tested, running as a systemd user service.
 Published page with the same diagrams: https://claude.ai/artifact/Kz2GVi8aQ5SpxxtQVg1HFD
 
 ## 1. What it is
@@ -57,7 +57,7 @@ flowchart TB
   end
   subgraph usecases["usecases/ — one file per verb"]
     U1[handle_update] --> U2[handle_message]
-    U2 --> U4[replan · scout · change_settings · add_project]
+    U2 --> U4[queue · replan · scout · change_settings · add_project · add_task]
     U3[morning_checkin · reconcile · checkin · morning_brief · compact]
     U5[work · work_brain · work_result · task_buttons · task_update · apply_plan]
     U2 --> U5
@@ -87,19 +87,22 @@ sequenceDiagram
   You->>TG: "move the demo to Friday"
   TG->>AD: getUpdates
   AD->>HU: update
-  HU->>ST: lock · dedup update_id · append history/today.md
+  HU->>ST: lock · dedup update_id (in poll order)
+  Note over HU,HM: each update runs in its own thread
   HU->>HM: text, message_id
+  HM->>ST: append history/today.md
   HM->>TG: 👀 reaction · "typing…" every 4 s until reply
   HM->>ST: settings · summary.md · last 2 days · projects
   HM->>BR: prompt (gpt-5.5 low)
   BR-->>HM: {reply, document, actions:[replan]}
-  HM->>TG: 🤔 reaction (heavy action started)
-  HM->>BR: replan prompt (gpt-6-astra high)
-  BR-->>HM: {document: new plan.md}
-  HM->>ST: write plan.md · append reply
-  HM->>AD: send(reply) · edit(pinned)
-  AD->>TG: sendMessage · editMessageText · reaction cleared
-  TG->>You: reply + updated pin
+  HM->>ST: push replan job to state.json jobs
+  HM->>AD: send(reply, reply_to=message_id)
+  AD->>TG: sendMessage with reply_parameters · reaction cleared
+  TG->>You: threaded reply "Replanning queued (1st in line)."
+  Note over ST,BR: the executor (mentor job work) drains the queue later
+  ST->>BR: replan, plan tier gpt-5.6-sol medium
+  BR-->>ST: {ops:[set, move, add]} applied to tasks.json
+  ST->>TG: progress message becomes the summary · pin edited
 ```
 
 ## 5. Brain: cheap chat, heavy planners, a write-enabled worker
@@ -108,7 +111,8 @@ sequenceDiagram
 flowchart TB
   U[chat message] --> C["chat brain · gpt-5.5 low · read-only"]
   C --> OUT["{reply, document, actions:[{kind,args}]}"]
-  OUT -- replan --> P["replan.run · heavy settings<br/>document → plan.md → pin"]
+  OUT -- replan --> P["queue.push replan job<br/>executor: replan.run · plan tier<br/>ops → tasks.json → plan.md → pin"]
+  OUT -- add_task --> AT["add_task.run<br/>ad-hoc task at the top of tasks.json → kick"]
   OUT -- scout --> S["scout.run · read-only over project repo_path"]
   OUT -- set_settings --> V{"change_settings.run<br/>valid vs ALLOWED?"}
   OUT -- add_project --> A{"add_project.run<br/>slug ok · repo_path exists?"}
@@ -119,25 +123,26 @@ flowchart TB
   V -- no --> R1[reply: allowed list]
   A -- yes --> W2["data/projects/&lt;name&gt;/ from _template"]
   A -- no --> R2[reply: rejected]
-  P & S & W1 & W2 & I & WK & TU --> RES[folded into reply]
+  P & AT & S & W1 & W2 & I & WK & TU --> RES[folded into reply]
 ```
 
 Images: the brain never renders. It emits `send_image{diagram, caption}`; the use case posts the
 PNG from Kroki (`KROKI_URL`, default kroki.io, self-hostable) and a failure lands in the reply text.
 
 `task_result` is a worker-only kind. The chat prompt forbids it and `output_schema.json` lists all
-eight kinds: replan, scout, set_settings, add_project, send_image, work, task_update, task_result.
+kinds: replan, scout, set_settings, add_project, send_image, work, task_update, add_task, task_result.
 
 ### Routing
 
 `RoutingBrain` picks the adapter from `BrainTask.settings.provider` and builds each one once;
-an unknown provider returns `brain error: unknown provider`. Three tiers in `settings.json`
+an unknown provider returns `brain error: unknown provider`. Four tiers in `settings.json`
 (`domain/settings.py` `tier`):
 
 | Tier | Used for | Default |
 |---|---|---|
 | chat (top-level) | chat, scout, compact | gpt-5.5 low |
-| `heavy` | replan, reconcile, `research` and `writing` tasks | gpt-6-astra high |
+| `plan` | replan, reconcile | gpt-5.6-sol medium |
+| `heavy` | `research` and `writing` tasks | gpt-5.6-sol high |
 | `coder` | `coding` and `system` tasks | claude sonnet high |
 
 A task can run on the other tier's provider when `task.provider` names it (the
@@ -183,6 +188,12 @@ stdout, `-o` still holds the answer) and Claude uses `--output-format stream-jso
 stall guard and cancel() (kill the process group) and maps tool calls to short lines ("ran `ls`", "edited a.txt").
 Unknown or broken events are skipped. Without `on_step` the commands are unchanged.
 
+No brain timeouts: getting a task done matters more than waiting. Two stops remain, both in
+`stream.py`: the stall guard (no stdout line for 60 minutes kills the process group, "brain error: stalled")
+and `/cancel` (`handle_update` sends SIGTERM to `state["executor_pid"]`; the executor's handler calls
+`stream.cancel()`, the run returns "brain error: cancelled", and the job or task fails normally while the loop goes on).
+Only `mentor doctor` (180 s) and Telegram network calls keep timeouts.
+
 `--ignore-user-config`: this machine's `~/.codex/config.toml` routes to a local proxy and MCP servers that hang headless.
 
 ### Allowed models (`domain/settings.py`)
@@ -192,7 +203,7 @@ flowchart LR
   subgraph codex
     A["gpt-5.5 · low..xhigh"]
     B["gpt-5.6-luna · low..max"]
-    C["gpt-5.6-sol/terra · gpt-6-astra · low..ultra"]
+    C["gpt-5.6-sol/terra · low..ultra"]
     D["gpt-reserve · low..max"]
   end
   subgraph claude
@@ -200,16 +211,28 @@ flowchart LR
     F["sonnet · opus · fable · claude-opus-5-5 · low..max"]
   end
   CHAT[chat default] --> A
-  HEAVY[heavy default] --> C
+  PLAN[plan and heavy defaults] --> C
 ```
 
 ## 6. Task graph and work loop
 
 `data/tasks.json` is the source of truth. `data/plan.md` and the pinned message are rendered
 from it by `apply_plan.refresh` after every change (Next / In progress / Waiting on you / Failed /
-Then / Done n of m). Replan and check-in Approve write the graph through `apply_plan.run`: parse,
-reject cycles or unknown deps, then merge so runtime fields (`files`, `approved`, `provider`,
-`proposal`) and non-final statuses survive. A running task missing from the new graph is kept.
+Then / Done n of m). Replan and reconcile get a compact `tasks.brief` (one line per live task) and
+return a patch, `{"ops": [...]}`: `add {task, after}`, `set {id, fields}` (status only todo, done or dropped;
+running and awaiting tasks keep their status and are reported), `move {id, after}`. `task_ops.apply_ops`
+skips unknown ids and reports them; validation (cycles, unknown deps) rejects the whole patch on error.
+Reconcile dry-runs its ops, stores them in the check-in state and applies them on Approve through
+`apply_plan.run`. A document with `"tasks"` instead (first run, "rebuild the plan") is parsed and merged so
+runtime fields (`files`, `approved`, `provider`, `proposal`) and non-final statuses survive.
+
+### Queue and executor
+
+`state.json["jobs"]` is a durable list of `replan {reason}` and `reconcile {}` jobs (`usecases/queue.py`).
+`push` appends under `data/.lock` and posts `🕒 Queued (2nd): Replanning` as a reply; the executor adopts that
+message as its progress message. Ad-hoc user work is not a job: the chat action `add_task` inserts a task at the
+top of `tasks.json` and kicks the executor, so it is the next ready task. Task `kind` only routes the model tier.
+`take` counts attempts; a job taken twice without finishing is dropped with "Gave up on …".
 
 Task: `id`, `title`, `project`, `kind` (`research` `writing` `coding` `system` `user`), `deps`,
 `due`, `status`, `note`, plus runtime fields. The next task is the first `todo` in list order
@@ -245,9 +268,9 @@ status answers "Already handled." Approve with another provider sets `task.provi
 
 ```mermaid
 flowchart TB
-  K["kick: button · work · task_update · replan · morning job<br/>or hourly timer"] --> LK{"data/.work.lock<br/>free?"}
-  LK -- no --> EX["exit: work loop already running"]
-  LK -- yes --> RS["reset stale running to todo"] --> CL
+  K["kick: button · work · add_task · task_update · replan · morning job<br/>serve startup · or hourly timer"] --> LK["wait for data/.work.lock<br/>(blocking flock)"]
+  LK --> RS["reset stale running to todo"] --> JB
+  JB["drain queued jobs first<br/>replan · reconcile, no daily budget"] --> CL
   CL["claim under data/.lock: first ready task"] --> RD{"ready task?"}
   RD -- none --> FIN
   RD -- yes --> UT{"kind = user?"}
@@ -262,7 +285,7 @@ flowchart TB
   OC -- "failed or missing" --> T4["progress message: Failed + reply"]
   T1 & T2 & T3 & T4 --> NX[next ready task]
   PK --> NX
-  NX --> CL
+  NX --> JB
   FIN["send 'Work loop finished' summary<br/>refresh plan.md and pin"]
 ```
 
@@ -285,8 +308,10 @@ Details:
 - Files are sent only from the work dir or project repo, up to 50 MB each. Email drafts go to Gmail
   Drafts over IMAP (`adapters/mail/imap.py`, `Mail.draft`); with no mail configured, or on an
   IMAP error, the draft text is sent in Telegram instead. Nothing is ever sent as email.
-- Single instance: `mentor job work` takes `data/.work.lock` non-blocking. Kicked runs
-  (`app/kick.py`, detached subprocess) log to `data/work.log`.
+- Single instance: `mentor job work` takes `data/.work.lock` with a blocking flock, so a kicked process waits its
+  turn and drains the queue; it records `state["executor_pid"]` for `/cancel`. Kicked runs
+  (`app/kick.py`, detached subprocess) log to `data/work.log`. `mentor.service` uses `KillMode=process`, so a
+  `serve` restart does not kill the executor.
 
 ## 7. Projects are folders
 
@@ -314,21 +339,24 @@ flowchart LR
   L --> ID{done today?<br/>state.json}
   ID -- yes --> NO[no-op]
   ID -- no --> RUN[use case] --> MARK[mark state.json]
-  J -. "work: own lock data/.work.lock, no daily mark" .-> WL[work loop]
-  RUN -. "morning · replan" .-> KK["kick: mentor job work in background"] -.-> WL
+  J -. "work: own lock data/.work.lock, no daily mark" .-> WL[executor]
+  RUN -. "replan · reconcile: push job" .-> QU[("jobs queue")]
+  QU --> WL
+  J -. "morning · deadline · replan then run the executor" .-> WL
 ```
 
 | Job | When (Europe/Kyiv) | Brain |
 |---|---|---|
-| morning check-in → brief | daily 08:00 | chat; heavy if reconciling |
-| check-in deadline | daily 09:00 | heavy (reconcile) if still pending |
-| replan | Sunday 20:00 | heavy settings |
+| morning check-in → brief | daily 08:00 | chat; plan tier if reconciling |
+| check-in deadline | daily 09:00 | plan tier (reconcile job) if still pending |
+| replan | Sunday 20:00 | plan tier (queued job) |
 | compact | Sunday 21:00 | chat settings |
-| work | hourly safety net, plus kicks | `heavy` or `coder` per task kind |
+| work (executor) | hourly safety net, plus kicks | jobs: plan tier; tasks: `heavy` or `coder` per kind |
 
-The weekly replan and the morning job kick the worker when they finish. A chat replan, a button
-press (other than Reject), the chat actions `work` and `task_update` kick it too. Check-in Approve
-and the 09:00 deadline job do not kick; the next kick or the hourly timer picks the new tasks up.
+The morning, deadline and replan jobs queue their plan changes and then run the executor in-process
+(under the in-process scheduler they kick it instead). A chat replan, a button press (other than Reject),
+and the chat actions `work`, `add_task` and `task_update` kick it too. Check-in Approve does not kick; the
+next kick or the hourly timer picks the new tasks up.
 
 ### Morning check-in
 
@@ -341,8 +369,8 @@ flowchart TB
   Q -- No --> AW["'send updates by 09:00'<br/>stage = awaiting_updates"]
   AW -- chat message --> R
   Q & AW -- "09:00 deadline job" --> R
-  R["reconcile · heavy brain<br/>prompts/reconcile.md"] -- "document null" --> B[morning brief]
-  R -- document --> P["proposal [Approve] [Reject]<br/>stage = proposed · plan.md untouched"]
+  R["reconcile job · plan tier<br/>prompts/reconcile.md"] -- "document null" --> B[morning brief]
+  R -- ops --> P["proposal [Approve] [Reject]<br/>stage = proposed · plan.md untouched"]
   P -- Approve --> AP["apply_plan: tasks.json → plan.md · edit pin"] --> B
   P -- Reject --> RJ["'What should I change instead?'<br/>next message → normal chat"]
 ```
@@ -377,8 +405,8 @@ flowchart TB
 
 ```
 mentor/
-  domain/      settings.py actions.py project.py conversation.py tasks.py
-  usecases/    handle_update.py handle_message.py busy.py morning_brief.py replan.py
+  domain/      settings.py actions.py project.py conversation.py tasks.py task_ops.py
+  usecases/    handle_update.py handle_message.py busy.py queue.py add_task.py send_files.py morning_brief.py replan.py
                scout.py compact.py change_settings.py add_project.py send_image.py
                morning_checkin.py checkin.py checkin_state.py reconcile.py
                apply_plan.py work.py work_brain.py work_result.py progress.py task_buttons.py task_update.py
@@ -397,7 +425,7 @@ tests/         unit/ usecases/ e2e/     scripts/live_smoke.sh     Dockerfile com
 |---|---|
 | personality, rules | `prompts/mentor.md` |
 | a project's deadlines | `data/projects/<name>/timeline.md`, or tell the bot |
-| chat / heavy model | tell the bot (`set_settings`) → `data/settings.json` |
+| chat / plan / heavy / coder model | tell the bot (`set_settings`) → `data/settings.json` |
 | coder model, work budget | `data/settings.json` `coder`, `work.daily_runs` |
 | what the worker may do alone | `prompts/work.md` (a prompt rule, not enforced) |
 | task kinds, statuses, ordering | `domain/tasks.py` |
@@ -423,7 +451,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  subgraph "tests/ · 143 · no network"
+  subgraph "tests/ · 191 · no network"
     U[unit: settings · store · markdown] --> UC[usecases: fake brain + fake chat]
     UC --> E2E["e2e: Bot API stub (http.server) + fake brain<br/>full day: chat → settings → replan → morning → compact"]
   end
