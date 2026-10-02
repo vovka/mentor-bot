@@ -48,6 +48,8 @@ def _build(item: dict, names: set[str]) -> Task:
 
 
 def _validate(tasks: list[Task]) -> None:
+    for t in tasks:
+        _check_types(t)
     ids = [t.id for t in tasks]
     if len(set(ids)) != len(ids):
         raise ValueError("duplicate task id")
@@ -63,6 +65,15 @@ def _validate(tasks: list[Task]) -> None:
         tuple(TopologicalSorter({t.id: t.deps for t in tasks}).static_order())
     except CycleError as e:
         raise ValueError("dependency cycle") from e
+
+
+def _check_types(t: Task) -> None:
+    """Planner output is untrusted JSON: a wrong type is a readable ValueError, never a TypeError later."""
+    for name in ("id", "title", "project", "kind", "due", "status", "note"):
+        if not isinstance(getattr(t, name), str):
+            raise ValueError(f"task {t.id!r}: {name} must be a string")
+    if not isinstance(t.deps, list) or not all(isinstance(d, str) for d in t.deps):
+        raise ValueError(f"task {t.id!r}: deps must be a list of ids")
 
 
 def dump(tasks: list[Task]) -> str:

@@ -36,7 +36,7 @@ flowchart LR
 | "I submitted the form" | marks that task done, the loop continues |
 | (a task needs a risky step) | sends a proposal with Approve / Approve · other provider / Reject |
 
-Every answer is a Telegram reply to the message it belongs to, and messages are handled concurrently, so you can keep writing while an earlier one is processed. Replans, reconciles and tasks run one at a time through a durable queue; the bot posts "Queued (2nd)" and edits it into the live progress message.
+Every answer is a Telegram reply to the message it belongs to, and messages are handled concurrently, so you can keep writing while an earlier one is processed. Replans and tasks run one at a time through a durable queue (the morning reconcile only proposes changes, so it runs right away and never waits behind a task); the bot posts "Queued (2nd)" and edits it into the live progress message.
 
 While it works you see 👀 on your message and "typing…"; 🤔 means a heavy step is running.
 
@@ -89,10 +89,10 @@ mentor job compact   # fold old chat history into summary.md
 mentor job work      # work loop: next ready task until none is left or the daily budget is used
 ```
 
-`morning`, `deadline` and `replan` queue their plan changes and then run the executor. The executor
-drains queued jobs (replan, reconcile) before tasks, then takes the next ready task. It also starts
+`morning` and `deadline` reconcile directly (the brief is never held behind a task), `replan` queues a job;
+all three then run the executor. The executor drains queued replans before tasks, then takes the next ready task. It also starts
 after button presses, the chat actions `work`, `add_task` and `task_update`, and at `serve` startup;
-an hourly timer is the safety net. One instance runs at a time: a second one waits for the lock.
+an hourly timer is the safety net. One instance runs at a time: a second one waits for the lock, and at most one waits.
 Output goes to `data/work.log`.
 
 Run them from cron, systemd timers, or `mentor serve --with-scheduler`. See

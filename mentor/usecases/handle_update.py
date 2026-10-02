@@ -2,10 +2,11 @@
 
 import os
 import signal
+from pathlib import Path
 
 from mentor.adapters.store.lock import locked
 from mentor.domain.conversation import Update
-from mentor.usecases import checkin, handle_message, task_buttons
+from mentor.usecases import checkin, handle_message, queue, task_buttons
 
 
 def run(store, brain, chat, clock, update: Update, renderer=None, kick=lambda: None) -> None:
@@ -26,7 +27,7 @@ def claim(store, update: Update) -> bool:
 
 def route(store, brain, chat, clock, update: Update, renderer=None, kick=lambda: None) -> None:
     if update.text.strip() == "/cancel":
-        chat.send(_cancel(store.read_state().get("executor_pid")), reply_to=update.message_id)
+        chat.send(_cancel(store), reply_to=update.message_id)
         return
     if update.callback_data.startswith("t:"):
         task_buttons.on_button(store, chat, update, kick)
@@ -39,15 +40,44 @@ def route(store, brain, chat, clock, update: Update, renderer=None, kick=lambda:
         return
 
     handle_message.run(store, brain, chat, clock, update.text, update.message_id, renderer, kick)
-    checkin.after_message(store, brain, chat, clock, kick)
+    checkin.after_message(store, brain, chat, clock)
 
 
-def _cancel(pid) -> str:
-    """SIGTERM makes the executor kill its running brain CLI; the job or task then fails normally."""
-    if not pid:
+def _cancel(store) -> str:
+    """SIGUSR1 makes the executor kill its running brain CLI; the job or task then fails normally."""
+    pid = store.read_state().get("executor_pid")
+    if not pid or not _is_executor(pid):
+        _clear_executor_pid(store)
         return "Nothing is running."
     try:
-        os.kill(pid, signal.SIGTERM)
+        os.kill(pid, signal.SIGUSR1)
     except ProcessLookupError:
         return "Nothing is running."
-    return "Cancelling the current job."
+    what = _running(store)
+    return f"Cancelling: {what}" if what else "Cancelling the current job."
+
+
+def _is_executor(pid: int) -> bool:
+    """Alive and ours (`mentor job work`), not a stranger that reused the pid after a crash."""
+    try:
+        args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+    except OSError:
+        return False
+    return b"job" in args and b"work" in args
+
+
+def _clear_executor_pid(store) -> None:
+    with locked(store.data_dir):
+        state = store.read_state()
+        if state.get("executor_pid"):
+            state["executor_pid"] = None
+            store.write_state(state)
+
+
+def _running(store) -> str:
+    """The task in `running`, else the job taken by the executor, else ""."""
+    task = next((t for t in store.read_tasks() if t.status == "running"), None)
+    if task:
+        return task.title
+    job = next((j for j in queue.pending(store) if j["attempts"]), None)
+    return queue.LABELS[job["kind"]] if job else ""

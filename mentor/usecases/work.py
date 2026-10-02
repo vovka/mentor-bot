@@ -1,4 +1,4 @@
-"""The single executor: drain queued jobs (replan, reconcile) first, then do the next ready task (or park it),
+"""The single executor: drain queued jobs (replan) first, then do the next ready task (or park it),
 report, repeat until nothing is left or the daily budget is used. Jobs don't count against the budget."""
 
 from dataclasses import replace
@@ -7,7 +7,7 @@ from mentor.adapters.store.lock import locked
 from mentor.domain import tasks
 from mentor.domain.actions import BrainResult
 from mentor.domain.settings import work_limits
-from mentor.usecases import apply_plan, queue, reconcile, replan, work_brain, work_result
+from mentor.usecases import apply_plan, queue, replan, work_brain, work_result
 from mentor.usecases.progress import Progress, model_line
 
 _BUDGET = "daily budget used"
@@ -51,10 +51,7 @@ def _drop_exhausted(store, chat) -> None:
 def _run_job(store, brain, chat, clock, job) -> None:
     mid = job.get("message_id")
     try:
-        if job["kind"] == "replan":
-            chat.send(replan.run(store, brain, chat, clock, job["args"].get("reason") or "", message_id=mid))
-        else:
-            reconcile.run(store, brain, chat, clock, message_id=mid)
+        chat.send(replan.run(store, brain, chat, clock, job["args"].get("reason") or "", message_id=mid))
     except Exception as error:  # left queued: retried once, then dropped by _drop_exhausted
         print(f"work: job {job['id']} failed: {error}")
         return

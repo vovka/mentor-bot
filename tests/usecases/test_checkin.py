@@ -31,7 +31,7 @@ def _press(env, data, message_id, update_id):
 
 
 def _drained(job, store, brain, chat, clock):
-    """Run a check-in job, then the queued reconcile the executor would pick up."""
+    """Run a check-in job, then any queued job the executor would pick up."""
     result = job(store, brain, chat, clock)
     work.drain_jobs(store, brain, chat, clock)
     return result
@@ -68,7 +68,7 @@ def test_approve_writes_plan_edits_pin_sends_brief(tmp_path):
     store, brain, chat, clock = env
     _drained(morning_checkin.morning, store, brain, chat, clock)
     _press(env, "yes", 1, 1)
-    _press(env, "approve", 3, 2)  # 2 is the queued-reconcile message
+    _press(env, "approve", 3, 2)  # 2 is the reconcile progress message
     assert [t.title for t in store.read_tasks()] == ["do A today"]
     assert store.read_plan() == tasks.render(store.read_tasks())
     assert chat.edits == [(99, store.read_plan())]
@@ -145,7 +145,7 @@ def test_ops_proposal_is_applied_on_approve_to_current_tasks(tmp_path):
     _press(env, "yes", 1, 1)
     assert _checkin(store)["document"] == ops and store.read_tasks()[0].due == ""
     store.write_tasks([*store.read_tasks(), tasks.Task("b-1", "B")])
-    _press(env, "approve", 3, 2)  # 2 is the queued-reconcile message
+    _press(env, "approve", 3, 2)  # 2 is the reconcile progress message
     assert [(t.id, t.due) for t in store.read_tasks()] == [("a-1", "2026-09-30"), ("b-1", "")]
 
 
@@ -159,7 +159,26 @@ def test_ops_proposal_failing_the_dry_run_is_discarded(tmp_path):
     assert _checkin(store) is None
 
 
-def test_checkin_reconcile_is_queued_not_run(tmp_path):
-    store, brain, chat, clock = _setup(tmp_path, [], history="user: done A\n")
-    assert morning_checkin.morning(store, brain, chat, clock) == "Reconciling the plan queued (1st in line)."
-    assert [j["kind"] for j in store.read_state()["jobs"]] == ["reconcile"] and brain.tasks == []
+def test_checkin_reconcile_runs_inline_not_queued(tmp_path):
+    store, brain, chat, clock = _setup(tmp_path, [_NOTHING, _BRIEF], history="user: done A\n")
+    morning_checkin.morning(store, brain, chat, clock)
+    assert store.read_state().get("jobs", []) == [] and len(brain.tasks) == 2
+    assert store.read_state()["last_brief_date"] == "2026-09-30"
+
+
+class _Crashing(FakeBrain):
+    def run(self, task):
+        if not self.tasks:
+            self.tasks.append(task)
+            raise RuntimeError("boom")
+        return super().run(task)
+
+
+def test_reconcile_crash_clears_checkin_and_sends_brief_once(tmp_path):
+    env = _setup(tmp_path, [])
+    store, _, chat, clock = env
+    brain = _Crashing([_BRIEF])
+    morning_checkin.morning(store, brain, chat, clock)
+    _press((store, brain, chat, clock), "yes", 1, 1)
+    assert "Plan proposal discarded: reconcile failed: boom" in chat.outbox
+    assert chat.outbox.count("good morning") == 1 and _checkin(store) is None

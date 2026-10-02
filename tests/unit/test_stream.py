@@ -98,3 +98,14 @@ def test_cancel_kills_the_running_cli(tmp_path, monkeypatch):
 
 def test_cancel_with_nothing_running_is_a_noop():
     stream.cancel()
+
+
+def test_cancel_after_the_cli_finished_does_not_abort(monkeypatch):
+    class Done:
+        def poll(self):
+            return 0
+
+    reason = []
+    monkeypatch.setattr(stream, "_current", (Done(), reason))
+    stream.cancel()
+    assert reason == []

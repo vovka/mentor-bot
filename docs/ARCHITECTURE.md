@@ -190,7 +190,8 @@ Unknown or broken events are skipped. Without `on_step` the commands are unchang
 
 No brain timeouts: getting a task done matters more than waiting. Two stops remain, both in
 `stream.py`: the stall guard (no stdout line for 60 minutes kills the process group, "brain error: stalled")
-and `/cancel` (`handle_update` sends SIGTERM to `state["executor_pid"]`; the executor's handler calls
+and `/cancel` (`handle_update` checks that `state["executor_pid"]` is alive and is `mentor job work` via
+`/proc/<pid>/cmdline`, then sends SIGUSR1; SIGTERM keeps meaning exit; the executor's handler calls
 `stream.cancel()`, the run returns "brain error: cancelled", and the job or task fails normally while the loop goes on).
 Only `mentor doctor` (180 s) and Telegram network calls keep timeouts.
 
@@ -228,8 +229,10 @@ runtime fields (`files`, `approved`, `provider`, `proposal`) and non-final statu
 
 ### Queue and executor
 
-`state.json["jobs"]` is a durable list of `replan {reason}` and `reconcile {}` jobs (`usecases/queue.py`).
-`push` appends under `data/.lock` and posts `🕒 Queued (2nd): Replanning` as a reply; the executor adopts that
+`state.json["jobs"]` is a durable list of `replan {reason}` jobs (`usecases/queue.py`). Reconcile is not
+queued: it only proposes ops (Approve applies them under the lock), so it runs where it is triggered and the
+brief never waits behind a task. `push` posts `🕒 Queued (2nd): Replanning` as a reply, then appends the job
+with that message id under `data/.lock`; the executor adopts that
 message as its progress message. Ad-hoc user work is not a job: the chat action `add_task` inserts a task at the
 top of `tasks.json` and kicks the executor, so it is the next ready task. Task `kind` only routes the model tier.
 `take` counts attempts; a job taken twice without finishing is dropped with "Gave up on …".
@@ -270,7 +273,7 @@ status answers "Already handled." Approve with another provider sets `task.provi
 flowchart TB
   K["kick: button · work · add_task · task_update · replan · morning job<br/>serve startup · or hourly timer"] --> LK["wait for data/.work.lock<br/>(blocking flock)"]
   LK --> RS["reset stale running to todo"] --> JB
-  JB["drain queued jobs first<br/>replan · reconcile, no daily budget"] --> CL
+  JB["drain queued jobs first<br/>replan, no daily budget"] --> CL
   CL["claim under data/.lock: first ready task"] --> RD{"ready task?"}
   RD -- none --> FIN
   RD -- yes --> UT{"kind = user?"}
@@ -309,7 +312,8 @@ Details:
   Drafts over IMAP (`adapters/mail/imap.py`, `Mail.draft`); with no mail configured, or on an
   IMAP error, the draft text is sent in Telegram instead. Nothing is ever sent as email.
 - Single instance: `mentor job work` takes `data/.work.lock` with a blocking flock, so a kicked process waits its
-  turn and drains the queue; it records `state["executor_pid"]` for `/cancel`. Kicked runs
+  turn and drains the queue; the waiter holds `data/.kick.lock` until it gets the work lock, so `kick()` does
+  not spawn (and a second waiter exits) while one already waits; it records `state["executor_pid"]` for `/cancel`. Kicked runs
   (`app/kick.py`, detached subprocess) log to `data/work.log`. `mentor.service` uses `KillMode=process`, so a
   `serve` restart does not kill the executor.
 
@@ -340,7 +344,7 @@ flowchart LR
   ID -- yes --> NO[no-op]
   ID -- no --> RUN[use case] --> MARK[mark state.json]
   J -. "work: own lock data/.work.lock, no daily mark" .-> WL[executor]
-  RUN -. "replan · reconcile: push job" .-> QU[("jobs queue")]
+  RUN -. "replan: push job" .-> QU[("jobs queue")]
   QU --> WL
   J -. "morning · deadline · replan then run the executor" .-> WL
 ```
@@ -348,12 +352,12 @@ flowchart LR
 | Job | When (Europe/Kyiv) | Brain |
 |---|---|---|
 | morning check-in → brief | daily 08:00 | chat; plan tier if reconciling |
-| check-in deadline | daily 09:00 | plan tier (reconcile job) if still pending |
+| check-in deadline | daily 09:00 | plan tier (reconcile, inline) if still pending |
 | replan | Sunday 20:00 | plan tier (queued job) |
 | compact | Sunday 21:00 | chat settings |
-| work (executor) | hourly safety net, plus kicks | jobs: plan tier; tasks: `heavy` or `coder` per kind |
+| work (executor) | hourly safety net, plus kicks | replan jobs: plan tier; tasks: `heavy` or `coder` per kind |
 
-The morning, deadline and replan jobs queue their plan changes and then run the executor in-process
+The morning and deadline jobs reconcile inline, the replan job queues a job; all then run the executor in-process
 (under the in-process scheduler they kick it instead). A chat replan, a button press (other than Reject),
 and the chat actions `work`, `add_task` and `task_update` kick it too. Check-in Approve does not kick; the
 next kick or the hourly timer picks the new tasks up.
@@ -369,14 +373,18 @@ flowchart TB
   Q -- No --> AW["'send updates by 09:00'<br/>stage = awaiting_updates"]
   AW -- chat message --> R
   Q & AW -- "09:00 deadline job" --> R
-  R["reconcile job · plan tier<br/>prompts/reconcile.md"] -- "document null" --> B[morning brief]
+  R["reconcile (inline, not queued) · plan tier<br/>prompts/reconcile.md"] -- "document null" --> B[morning brief]
   R -- ops --> P["proposal [Approve] [Reject]<br/>stage = proposed · plan.md untouched"]
   P -- Approve --> AP["apply_plan: tasks.json → plan.md · edit pin"] --> B
   P -- Reject --> RJ["'What should I change instead?'<br/>next message → normal chat"]
 ```
 
 State lives in `state.json` `checkin`; each transition is claimed under `data/.lock`, so a button
-and the 09:00 job never both act. A press on a stale stage or old message → "Already handled."
+and the 09:00 job never both act. Any reconcile failure (exception, brain error, invalid proposal) clears the
+check-in and sends the brief once.
+
+Known limits, kept on purpose: `apply_plan.refresh` edits the pinned message (a network call) while holding
+`data/.lock`, and non-streaming chat calls have no stall guard. A press on a stale stage or old message → "Already handled."
 
 ## 9. Memory
 

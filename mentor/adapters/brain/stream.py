@@ -58,10 +58,12 @@ def run(cmd: list[str], stdin_text: str, on_event, **popen_kw) -> subprocess.Com
 
 
 def cancel() -> None:
-    """Kill the streamed CLI running now, if any; its run() raises Aborted("cancelled")."""
+    """Kill the streamed CLI running now, if any; its run() raises Aborted("cancelled").
+
+    A CLI that already exited is left alone, so a finished run is never reported as cancelled."""
     with _lock:
         running = _current
-    if running:
+    if running and running[0].poll() is None:
         running[1].append("cancelled")
         _kill(running[0])
 

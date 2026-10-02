@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from mentor.domain import tasks
@@ -75,3 +77,34 @@ def test_brief_shape():
         "b | todo | research |  |  | deps=a | B\n"
         "done/dropped: c, d"
     )
+
+
+@pytest.mark.parametrize("op", [
+    {"op": "set", "id": "a", "deps": None},
+    {"op": "set", "id": "a", "deps": "b"},
+    {"op": "set", "id": "a", "deps": [1]},
+    {"op": "set", "id": "a", "title": None},
+    {"op": "set", "id": "a", "kind": ["coding"]},
+    {"op": "set", "id": "a", "due": 5},
+    {"op": "add", "task": {"id": 7, "title": "X"}},
+    {"op": "add", "task": {"id": "x", "title": ["X"]}},
+    {"op": "add", "task": None},
+    {"op": "add", "task": ["x"]},
+    {"op": ["add"]},
+    "add",
+])
+def test_malformed_values_raise_value_error(op):
+    with pytest.raises(ValueError):
+        apply_ops(_base(), [op])
+
+
+@pytest.mark.parametrize("item", [
+    {"id": "a", "title": "A", "deps": None},
+    {"id": "a", "title": "A", "status": None},
+    {"id": ["a"], "title": "A"},
+    {"id": "a", "title": "A", "note": {}},
+    "a",
+])
+def test_parse_rejects_wrong_types(item):
+    with pytest.raises(ValueError):
+        tasks.parse(json.dumps({"tasks": [item]}))

@@ -69,20 +69,26 @@ def _then_work(c: _Container, result: str) -> str:
 
 
 def _work(c: _Container) -> str:
-    """The single executor: waits for .work.lock, so a kicked run queues behind the running one."""
+    """The single executor: waits for .work.lock, so a kicked run queues behind the running one.
+
+    Only one process waits: it holds .kick.lock until it gets .work.lock, and a second waiter exits."""
     import os
     import threading
 
-    from mentor.adapters.store.lock import locked
+    from mentor.adapters.store.lock import locked, try_lock
     from mentor.app.kick import kick
     from mentor.usecases import work
 
     if threading.current_thread() is not threading.main_thread():  # in-process scheduler: keep serve alive
         kick()
         return "work loop kicked"
+    waiting = try_lock(c.store.data_dir, ".kick.lock")
+    if waiting is None:
+        return "another executor is already waiting"
     with locked(c.store.data_dir, ".work.lock"):
+        waiting.close()
         _set_executor_pid(c.store, os.getpid())
-        _on_sigterm_cancel()
+        _on_sigusr1_cancel()
         try:
             return work.run(c.store, c.brain, c.chat, c.clock, c.mail)
         finally:
@@ -98,12 +104,14 @@ def _set_executor_pid(store, pid) -> None:
         store.write_state(state)
 
 
-def _on_sigterm_cancel() -> None:
-    """/cancel: SIGTERM kills the running brain CLI; that job or task fails normally and the loop goes on."""
+def _on_sigusr1_cancel() -> None:
+    """/cancel: SIGUSR1 kills the running brain CLI; that job or task fails normally and the loop goes on.
+
+    SIGTERM keeps its default (exit); the task left `running` is reset to todo on the next start."""
     import signal
     import threading
 
     from mentor.adapters.brain import stream
 
     # off the main thread: the handler may interrupt it while it holds stream's lock
-    signal.signal(signal.SIGTERM, lambda signum, frame: threading.Thread(target=stream.cancel).start())
+    signal.signal(signal.SIGUSR1, lambda signum, frame: threading.Thread(target=stream.cancel).start())

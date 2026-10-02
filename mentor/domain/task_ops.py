@@ -16,7 +16,7 @@ def apply_ops(current: list[Task], ops: list) -> tuple[list[Task], list[str]]:
     for op in ops:
         if not isinstance(op, dict):
             raise ValueError("every op must be an object")
-        line = _OPS.get(op.get("op"), _unknown)(result, op)
+        line = _OPS.get(op.get("op") if isinstance(op.get("op"), str) else None, _unknown)(result, op)
         line and skipped.append(line)
     tasks._validate(result)
     return result, skipped

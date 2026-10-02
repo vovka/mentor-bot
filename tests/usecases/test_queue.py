@@ -24,8 +24,8 @@ def _replanned(*ids):
 def test_push_reports_position_and_posts_queued_message(tmp_path):
     store, chat = FileStore(tmp_path), FakeChat()
     assert queue.push(store, chat, "replan", {"reason": "x"}) == "Replanning queued (1st in line)."
-    assert queue.push(store, chat, "reconcile", {}) == "Reconciling the plan queued (2nd in line)."
-    assert chat.html_sent == ["🕒 Queued (1st): Replanning", "🕒 Queued (2nd): Reconciling the plan"]
+    assert queue.push(store, chat, "replan", {"reason": "y"}) == "Replanning queued (2nd in line)."
+    assert chat.html_sent == ["🕒 Queued (1st): Replanning", "🕒 Queued (2nd): Replanning"]
     assert [j["message_id"] for j in queue.pending(store)] == [1, 2]
 
 
@@ -53,10 +53,10 @@ def test_executor_runs_queued_replan_first_in_the_queued_message(tmp_path):
 
 def test_job_taken_twice_is_dropped_with_a_message(tmp_path):
     store, chat = FileStore(tmp_path), FakeChat()
-    queue.push(store, chat, "reconcile", {})
+    queue.push(store, chat, "replan", {"reason": "x"})
     queue.take(store), queue.take(store)
     work.run(store, FakeBrain([]), chat, _CLOCK)
-    assert chat.outbox == ["Gave up on reconciling the plan after 2 attempts."] and queue.pending(store) == []
+    assert chat.outbox == ["Gave up on replanning after 2 attempts."] and queue.pending(store) == []
 
 
 def test_jobs_do_not_consume_daily_runs(tmp_path):
@@ -79,12 +79,35 @@ def test_add_task_goes_first_and_runs_next(tmp_path):
     assert "/a-2" in brain.tasks[0].cwd
 
 
-def test_cancel_sends_sigterm_to_the_recorded_executor(tmp_path, monkeypatch):
+def test_job_is_stored_with_its_queued_message_id(tmp_path):
+    store, seen = FileStore(tmp_path), []
+
+    class Chat(FakeChat):
+        def send_html(self, text, reply_to=None):
+            seen.append(queue.pending(store))  # the job is appended only after its message exists
+            return super().send_html(text, reply_to)
+
+    queue.push(store, Chat(), "replan", {"reason": "x"})
+    assert seen == [[]] and queue.pending(store)[0]["message_id"] == 1
+
+
+def test_cancel_sends_sigusr1_to_our_executor(tmp_path, monkeypatch):
     store, chat, killed = FileStore(tmp_path), FakeChat(), []
     monkeypatch.setattr(os, "kill", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(handle_update, "_is_executor", lambda pid: True)
     store.write_state({"executor_pid": 4242})
+    store.write_tasks([Task("a", "Fix the form", status="running")])
     handle_update.run(store, FakeBrain([]), chat, _CLOCK, Update(1, 1, "/cancel", datetime.now()))
-    assert killed == [(4242, signal.SIGTERM)] and chat.outbox == ["Cancelling the current job."]
+    assert killed == [(4242, signal.SIGUSR1)] and chat.outbox == ["Cancelling: Fix the form"]
     store.write_state({**store.read_state(), "executor_pid": None})
     handle_update.run(store, FakeBrain([]), chat, _CLOCK, Update(2, 1, "/cancel", datetime.now()))
     assert chat.outbox[-1] == "Nothing is running." and len(killed) == 1
+
+
+def test_cancel_ignores_a_pid_that_is_not_our_executor(tmp_path, monkeypatch):
+    store, chat, killed = FileStore(tmp_path), FakeChat(), []
+    monkeypatch.setattr(os, "kill", lambda pid, sig: killed.append((pid, sig)))
+    store.write_state({"executor_pid": os.getpid()})  # alive, but pytest, not `mentor job work`
+    handle_update.run(store, FakeBrain([]), chat, _CLOCK, Update(1, 1, "/cancel", datetime.now()))
+    assert killed == [] and chat.outbox == ["Nothing is running."]
+    assert store.read_state()["executor_pid"] is None

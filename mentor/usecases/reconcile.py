@@ -12,7 +12,8 @@ _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "reco
 BUTTONS = [("Approve", "approve"), ("Reject", "reject")]
 
 
-def run(store, brain, chat, clock, message_id: int | None = None) -> str:
+def run(store, brain, chat, clock, reply_to: int | None = None) -> str:
+    """Any failure (exception, brain error, invalid proposal) clears the check-in and sends the brief once."""
     today = clock.now().date()
     task = BrainTask(
         prompt=_build_prompt(store, today),
@@ -20,8 +21,11 @@ def run(store, brain, chat, clock, message_id: int | None = None) -> str:
         write=False,
         settings=tier(store.read_settings(), "plan"),
     )
-    result = progress.tracked(chat, brain, task, "Reconciling the plan", "reconcile", message_id)
-    error = _invalid(store, result.document)
+    try:
+        result = progress.tracked(chat, brain, task, "Reconciling the plan", "reconcile", reply_to=reply_to)
+        error = _invalid(store, result.document)
+    except Exception as e:  # never leave the check-in stuck in "working" without a brief
+        result, error = None, f"reconcile failed: {e}"
     if error or not result.document:
         checkin_state.save(store, None)
         if error:

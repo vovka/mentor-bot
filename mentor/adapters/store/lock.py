@@ -1,4 +1,4 @@
-"""Blocking cross-process lock over a file in the data dir."""
+"""Cross-process locks over files in the data dir."""
 
 import contextlib
 import fcntl
@@ -15,3 +15,14 @@ def locked(data_dir: Path, name: str = ".lock"):
             yield
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def try_lock(data_dir: Path, name: str):
+    """The open file holding an exclusive lock on `name` (close it to release), or None when it is busy."""
+    f = open(data_dir / name, "a")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        f.close()
+        return None
+    return f
