@@ -71,11 +71,11 @@ def test_full_day_scenario(tmp_path, monkeypatch):
     assert "user: what's due?" in history and "bot: due today: item X" in history
 
     # b. settings change via action.
-    settings_action = [Action(kind="set_settings", args={"model": "gpt-6-astra", "effort": "low"})]
+    settings_action = [Action(kind="set_settings", args={"model": "gpt-5.6-sol", "effort": "low"})]
     results = [BrainResult(reply="switching model", actions=settings_action, raw={})]
-    offset = _step(container, stub, offset, "use gpt-6-astra low", results)
+    offset = _step(container, stub, offset, "use gpt-5.6-sol low", results)
     settings = container.store.read_settings()
-    assert settings["model"] == "gpt-6-astra" and settings["effort"] == "low"
+    assert settings["model"] == "gpt-5.6-sol" and settings["effort"] == "low"
     last_send = [c for c in stub.calls if c[0] == "sendMessage"][-1]
     assert "Settings updated" in last_send[1]["text"]
     methods = [c[0] for c in stub.calls]

@@ -15,7 +15,8 @@ DEFAULT_SETTINGS = {
     "provider": "codex",
     "model": "gpt-5.5",
     "effort": "low",
-    "heavy": {"provider": "codex", "model": "gpt-6-astra", "effort": "high"},
+    "plan": {"provider": "codex", "model": "gpt-5.6-sol", "effort": "medium"},
+    "heavy": {"provider": "codex", "model": "gpt-5.6-sol", "effort": "high"},
 }
 
 
@@ -56,9 +57,11 @@ class FileStore:
         current.update(provider=settings.provider, model=settings.model, effort=settings.effort)
         (self.data_dir / "settings.json").write_text(json.dumps(current, indent=2))
 
-    def write_heavy_settings(self, settings: BrainSettings) -> None:
+    def write_tier(self, name: str, settings: BrainSettings) -> None:
+        if name == "chat":
+            return self.write_settings(settings)
         current = self.read_settings()
-        current["heavy"] = {
+        current[name] = {
             "provider": settings.provider,
             "model": settings.model,
             "effort": settings.effort,

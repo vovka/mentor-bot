@@ -53,7 +53,7 @@ def test_yes_proposes_without_touching_plan(tmp_path):
     assert chat.answered == ["cb1"] and chat.cleared == [1]
     assert store.read_plan() == "# old plan\n"
     assert _checkin(store)["stage"] == "proposed"
-    assert brain.tasks[0].settings.model == "gpt-6-astra"
+    assert brain.tasks[0].settings.model == "gpt-5.6-sol" and brain.tasks[0].settings.effort == "medium"
 
 
 def test_approve_writes_plan_edits_pin_sends_brief(tmp_path):
@@ -125,3 +125,27 @@ def test_invalid_proposal_is_dropped_with_error_then_brief(tmp_path):
     assert chat.outbox[-2].startswith("Plan proposal discarded: invalid JSON")
     assert chat.outbox[-1] == "good morning"
     assert _checkin(store) is None and store.read_tasks() == []
+
+
+def test_ops_proposal_is_applied_on_approve_to_current_tasks(tmp_path):
+    ops = json.dumps({"ops": [{"op": "set", "id": "a-1", "due": "2026-09-30"}]})
+    proposal = BrainResult(reply="A due today", actions=[], raw={}, document=ops)
+    env = _setup(tmp_path, [proposal, _BRIEF])
+    store, brain, chat, clock = env
+    store.write_tasks([tasks.Task("a-1", "A")])
+    morning_checkin.morning(store, brain, chat, clock)
+    _press(env, "yes", 1, 1)
+    assert _checkin(store)["document"] == ops and store.read_tasks()[0].due == ""
+    store.write_tasks([*store.read_tasks(), tasks.Task("b-1", "B")])
+    _press(env, "approve", 2, 2)
+    assert [(t.id, t.due) for t in store.read_tasks()] == [("a-1", "2026-09-30"), ("b-1", "")]
+
+
+def test_ops_proposal_failing_the_dry_run_is_discarded(tmp_path):
+    ops = json.dumps({"ops": [{"op": "set", "id": "a-1", "deps": ["ghost"]}]})
+    bad = BrainResult(reply="x", actions=[], raw={}, document=ops)
+    store, brain, chat, clock = _setup(tmp_path, [bad, _BRIEF], history="user: done A\n")
+    store.write_tasks([tasks.Task("a-1", "A")])
+    morning_checkin.morning(store, brain, chat, clock)
+    assert "Plan proposal discarded: task a-1: unknown dep ghost" in chat.outbox
+    assert _checkin(store) is None

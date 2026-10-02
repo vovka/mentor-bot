@@ -96,3 +96,15 @@ def test_invalid_document_changes_nothing_and_reports_error(tmp_path):
     assert summary.startswith("Plan not changed: invalid JSON") and summary.endswith("tried")
     assert store.read_plan() == "# old plan\n" and store.read_tasks() == []
     assert store.read_state()["last_replan"] == "2026-09-29"
+
+
+def test_ops_document_patches_existing_tasks(tmp_path):
+    store = FileStore(tmp_path)
+    store.write_tasks([tasks.Task("p-0", "keep"), tasks.Task("p-1", "move me")])
+    ops = json.dumps({"ops": [{"op": "set", "id": "p-1", "due": "2026-10-05"}]})
+    brain = _DocBrain(ops, "set a due date")
+    summary = replan.run(store, brain, FakeChat(), FixedClock(datetime(2026, 9, 29)), reason="due")
+    assert summary == "set a due date"
+    assert [(t.id, t.due) for t in store.read_tasks()] == [("p-0", ""), ("p-1", "2026-10-05")]
+    assert "p-1 | todo | research |  |  | deps= | move me" in brain.tasks[0].prompt
+    assert brain.tasks[0].settings.model == "gpt-5.6-sol" and brain.tasks[0].settings.effort == "medium"

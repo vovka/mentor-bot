@@ -26,6 +26,10 @@ def test_tier_selects_by_name():
     assert tier(raw, "chat") == BrainSettings("codex", "gpt-5.5", "low")
     assert tier(raw, "heavy").model == "gpt-5.6-sol"
     assert tier(raw, "coder") == BrainSettings("claude", "sonnet", "high")
+    assert tier(raw, "plan") == BrainSettings("codex", "gpt-5.6-sol", "medium")
+    assert tier({}, "heavy") == BrainSettings("codex", "gpt-5.6-sol", "high")
+    raw["plan"] = {"provider": "codex", "model": "gpt-5.5", "effort": "high"}
+    assert tier(raw, "plan").model == "gpt-5.5"
     raw["coder"] = {"provider": "codex", "model": "gpt-5.5", "effort": "low"}
     assert tier(raw, "coder").provider == "codex"
 
@@ -33,3 +37,8 @@ def test_tier_selects_by_name():
 def test_work_limits_overlay():
     assert work_limits({}) == {"daily_runs": 12, "timeout": 1800}
     assert work_limits({"work": {"timeout": 60}}) == {"daily_runs": 12, "timeout": 60}
+
+
+def test_astra_is_not_allowed():
+    with pytest.raises(ValueError, match="gpt-6-astra"):
+        validate("codex", "gpt-6-astra", "high")

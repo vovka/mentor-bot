@@ -68,6 +68,20 @@ def dump(tasks: list[Task]) -> str:
     return json.dumps({"tasks": [asdict(t) for t in tasks]}, indent=2, ensure_ascii=False)
 
 
+def brief(tasks: list[Task]) -> str:
+    """Compact planner view: one line per live task, one id-only line for the closed ones."""
+    live = [t for t in tasks if t.status not in ("done", "dropped")]
+    closed = [t.id for t in tasks if t.status in ("done", "dropped")]
+    lines = [_brief_line(t) for t in live]
+    return "\n".join(lines + ([f"done/dropped: {', '.join(closed)}"] if closed else []))
+
+
+def _brief_line(t: Task) -> str:
+    deps = f"deps={','.join(t.deps)}" if t.deps else "deps="
+    tail = f"{t.title} — {t.note}" if t.note else t.title
+    return " | ".join([t.id, t.status, t.kind, t.project, t.due, deps, tail])
+
+
 def next_ready(tasks: list[Task]) -> Task | None:
     state = {t.id: t.status for t in tasks}
     for t in tasks:

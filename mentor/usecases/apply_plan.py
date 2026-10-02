@@ -1,21 +1,42 @@
 """Apply a planner's tasks.json to the store, then refresh the plan.md view and the pinned message."""
 
+import json
+
 from mentor.adapters.store.lock import locked
-from mentor.domain import tasks
+from mentor.domain import task_ops, tasks
 
 _PIN_LIMIT = 3800
 
 
 def run(store, chat, document: str, **marks) -> str | None:
-    """Merge `document` into tasks.json. Returns the error text (nothing changed) or None."""
+    """Apply `document` (ops patch, or the full tasks list) to tasks.json. Returns the error text or None."""
     try:
-        new = tasks.parse(document)
+        with locked(store.data_dir):
+            new, skipped = apply(store.read_tasks(), document)
+            store.write_tasks(new)
     except ValueError as e:
         return str(e)
-    with locked(store.data_dir):
-        store.write_tasks(tasks.merge(store.read_tasks(), new))
+    skipped and chat.send("Plan patch notes:\n" + "\n".join(skipped))
     refresh(store, chat, **marks)
     return None
+
+
+def apply(current: list[tasks.Task], document: str) -> tuple[list[tasks.Task], list[str]]:
+    """The tasks after `document` and the lines of ops that were skipped; ValueError if it is invalid."""
+    data = _loads(document)
+    if "ops" not in data:
+        return tasks.merge(current, tasks.parse(document)), []
+    if not isinstance(data["ops"], list):
+        raise ValueError("'ops' must be a list")
+    return task_ops.apply_ops(current, data["ops"])
+
+
+def _loads(document: str) -> dict:
+    try:
+        data = json.loads(document)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"invalid JSON: {e}") from e
+    return data if isinstance(data, dict) else {}
 
 
 def refresh(store, chat, **marks) -> None:

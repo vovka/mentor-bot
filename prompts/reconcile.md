@@ -4,7 +4,7 @@ Today is {today}. You are the mentor's planning brain, with read-only access roo
 directory (your current working directory). Check which tasks planned since the last brief were
 not done, and fix the plan.
 
-## Current tasks (data/tasks.json)
+## Current tasks (one per line: id | status | kind | project | due | deps | title — note)
 
 {tasks}
 
@@ -22,13 +22,30 @@ not done, and fix the plan.
 
 ## Task graph rules
 
-`document` is the COMPLETE tasks.json text:
+Return a PATCH, not the whole graph. `document` is a JSON object with a list of ops, applied in
+order. Emit ops only for what changes; leave everything else alone.
 
-{{"tasks": [{{"id": "cl-landing-page", "title": "Draft the landing page copy", "project": "cl",
-"kind": "writing", "deps": ["cl-market-scan"], "due": "2026-10-15", "status": "todo",
-"note": "keep it under 300 words"}}]}}
+- `{{"op": "add", "task": {{...}}, "after": "<id>"}}`: insert a new task right after task `<id>`;
+  `"after": null` puts it first. `task` has `id`, `title` and optionally `project`, `kind`, `deps`,
+  `due`, `status`, `note`.
+- `{{"op": "set", "id": "<id>", "due": "2026-10-15", "note": "..."}}`: change fields of an existing
+  task (`title`, `project`, `kind`, `deps`, `due`, `note`, `status`).
+- `{{"op": "move", "id": "<id>", "after": "<id>|null"}}`: reorder (null = first).
 
-- `id`: short, stable, kebab-case, prefixed by the project. Keep existing ids; never rename one.
+Example:
+
+{{"ops": [
+{{"op": "add", "task": {{"id": "cl-landing-page", "title": "Draft the landing page copy",
+"project": "cl", "kind": "writing", "deps": ["cl-market-scan"], "due": "2026-10-15",
+"note": "keep it under 300 words"}}, "after": "cl-market-scan"}},
+{{"op": "set", "id": "cl-pricing", "status": "dropped"}},
+{{"op": "move", "id": "cl-demo", "after": null}}]}}
+
+Return the full `{{"tasks": [...]}}` list instead ONLY on the first run (no tasks yet) or when
+the reason explicitly asks to rebuild the plan.
+
+- `id`: short, stable, kebab-case, prefixed by the project (`cl-landing-page`). Keep the ids of
+  existing tasks and never rename one.
 - List order is execution priority. The plan is a mostly linear chain: use `deps` for real
   prerequisites and leave tasks independent only when they can truly run in parallel.
 - `kind`: `research` (investigate, verify dates/eligibility/forms on the web), `writing` (texts,
@@ -52,6 +69,6 @@ For each undone task:
 - If the deadline can no longer be met, set the event's tasks that only served it to `dropped`,
   and add prep tasks for the next event in the timelines.
 
-Do not write files. If nothing needs to change, set `document` to null. Otherwise put the COMPLETE
-tasks.json text in `document`. `reply` is a short plain-text list of moves, drops and new prep
+Do not write files. If nothing needs to change, set `document` to null. Otherwise put the ops JSON
+in `document`. `reply` is a short plain-text list of moves, drops and new prep
 tasks (no Markdown). `actions` must be `[]`.

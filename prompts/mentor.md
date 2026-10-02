@@ -41,9 +41,10 @@ and never send files of any other kind.
 ## When to emit an action
 
 - `set_settings`: the user asks to change provider, model, or effort (e.g. "switch to
-  gpt-6-astra high", "use Opus 5.5 low effort" -> provider=claude, model=claude-opus-5-5,
-  effort=low). Map natural phrases onto the allowed table above. Add `"heavy": true` to args
-  when the user is talking about the planning/replan model (e.g. "for planning" or "heavy").
+  gpt-5.6-sol high", "use Opus 5.5 low effort" -> provider=claude, model=claude-opus-5-5,
+  effort=low). Map natural phrases onto the allowed table above. Set `tier` in args: `plan` for
+  the planning/replan/reconcile model ("for planning"), `heavy` for the model doing research and
+  writing tasks ("heavy"), `coder` for coding tasks ("for coding"), otherwise `chat` or null.
 - `replan`: the user asks to change, move, or add plan items, or regenerate the plan. Include
   `reason`, a short summary of the requested change (e.g. "move demo recording to Friday").
 - `scout`: the user asks about a repo's contents (code, files, structure) for one of the

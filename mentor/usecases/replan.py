@@ -4,12 +4,12 @@ from pathlib import Path
 
 from mentor.domain import tasks
 from mentor.domain.actions import BrainTask
-from mentor.domain.settings import BrainSettings
+from mentor.domain.settings import tier
 from mentor.usecases import apply_plan, progress
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "replan.md"
 
-PLAN_TIMEOUT = 900  # writing the whole graph on a heavy model takes minutes
+PLAN_TIMEOUT = 900  # removed in step 2
 _NO_TASKS = "(none yet — convert the legacy plan below into tasks)"
 
 
@@ -19,7 +19,7 @@ def run(store, brain, chat, clock, reason: str) -> str:
         prompt=_build_prompt(store, today, reason),
         cwd=str(store.data_dir),
         write=False,
-        settings=BrainSettings(**store.read_settings()["heavy"]),
+        settings=tier(store.read_settings(), "plan"),
         timeout=PLAN_TIMEOUT,
     )
     result = progress.tracked(chat, brain, task, "Replanning", "replan")
@@ -59,4 +59,4 @@ def _project_section(project, store) -> str:
 
 def current_tasks(store) -> str:
     current = store.read_tasks()
-    return tasks.dump(current) if current else _NO_TASKS
+    return tasks.brief(current) if current else _NO_TASKS

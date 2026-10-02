@@ -3,10 +3,9 @@
 from datetime import date
 from pathlib import Path
 
-from mentor.domain import tasks
 from mentor.domain.actions import BrainTask
-from mentor.domain.settings import BrainSettings
-from mentor.usecases import checkin_state, morning_brief
+from mentor.domain.settings import tier
+from mentor.usecases import apply_plan, checkin_state, morning_brief
 from mentor.usecases.replan import PLAN_TIMEOUT, current_tasks
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "reconcile.md"
@@ -19,11 +18,11 @@ def run(store, brain, chat, clock) -> str:
         prompt=_build_prompt(store, today),
         cwd=str(store.data_dir),
         write=False,
-        settings=BrainSettings(**store.read_settings()["heavy"]),
+        settings=tier(store.read_settings(), "plan"),
         timeout=PLAN_TIMEOUT,
     )
     result = brain.run(task)
-    error = _invalid(result.document)
+    error = _invalid(store, result.document)
     if error or not result.document:
         checkin_state.save(store, None)
         if error:
@@ -37,9 +36,10 @@ def run(store, brain, chat, clock) -> str:
     return result.reply
 
 
-def _invalid(document: str | None) -> str | None:
+def _invalid(store, document: str | None) -> str | None:
+    """Dry-run the proposal against the current tasks; Approve applies it to whatever is current then."""
     try:
-        document and tasks.parse(document)
+        document and apply_plan.apply(store.read_tasks(), document)
     except ValueError as e:
         return str(e)
     return None
