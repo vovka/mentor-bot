@@ -6,6 +6,7 @@ from mentor.adapters.brain.fake import FakeBrain
 from mentor.adapters.store.files import FileStore
 from mentor.adapters.telegram.fake import FakeChat
 from mentor.domain.actions import Action, BrainResult
+from mentor.domain.tasks import Task
 from mentor.usecases import handle_message
 from tests.fixed_clock import FixedClock
 
@@ -53,33 +54,26 @@ def test_set_settings_bad_model_leaves_settings_unchanged(tmp_path):
     assert "allowed" in reply
 
 
-def test_replan_action_calls_replan_run_with_reason(tmp_path, monkeypatch):
-    store = FileStore(tmp_path)
-    calls = []
-    fake_replan = types.ModuleType("mentor.usecases.replan")
+def test_replan_action_queues_a_job_and_kicks(tmp_path):
+    store, kicks, chat = FileStore(tmp_path), [], FakeChat()
+    action = Action(kind="replan", args={"reason": "move demo to Friday"})
+    brain = FakeBrain([BrainResult(reply="on it", actions=[action], raw={})])
+    reply = handle_message.run(store, brain, chat, _CLOCK, "move demo to Friday", kick=lambda: kicks.append(1))
+    jobs = store.read_state()["jobs"]
+    assert [(j["kind"], j["args"]) for j in jobs] == [("replan", {"reason": "move demo to Friday"})]
+    assert "Replanning queued (1st in line)." in reply and kicks == [1] and len(brain.tasks) == 1
+    assert chat.html_sent == ["🕒 Queued (1st): Replanning"] and jobs[0]["message_id"] == 1
 
-    def fake_run(store_, brain_, chat_, clock_, reason):
-        calls.append(reason)
-        return "plan updated"
 
-    fake_replan.run = fake_run
-    monkeypatch.setitem(sys.modules, "mentor.usecases.replan", fake_replan)
-
-    brain = FakeBrain(
-        [
-            BrainResult(
-                reply="on it",
-                actions=[Action(kind="replan", args={"reason": "move demo to Friday"})],
-                raw={},
-            )
-        ]
-    )
-    chat = FakeChat()
-
-    reply = handle_message.run(store, brain, chat, _CLOCK, "move demo to Friday")
-
-    assert calls == ["move demo to Friday"]
-    assert "plan updated" in reply
+def test_add_task_action_inserts_at_top_and_kicks(tmp_path):
+    store, kicks = FileStore(tmp_path), []
+    store.write_tasks([Task("old", "Old")])
+    args = {"title": "Investigate the forms", "note": "use the browser", "kind": "bogus", "project": None}
+    brain = FakeBrain([BrainResult(reply="queued", actions=[Action("add_task", args)], raw={})])
+    reply = handle_message.run(store, brain, FakeChat(), _CLOCK, "investigate", kick=lambda: kicks.append(1))
+    first = store.read_tasks()[0]
+    assert (first.id, first.status, first.kind, first.note) == ("investigate-the-forms", "todo", "research", "use the browser")
+    assert "Queued as the next task" in reply and kicks == [1]
 
 
 def test_history_records_user_and_bot_lines(tmp_path):

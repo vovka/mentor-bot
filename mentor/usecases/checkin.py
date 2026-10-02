@@ -1,6 +1,6 @@
 """Check-in buttons (yes/no/approve/reject) and the awaiting-updates hook after a chat message."""
 
-from mentor.usecases import apply_plan, checkin_state, morning_brief, reconcile
+from mentor.usecases import apply_plan, checkin_state, morning_brief, queue
 
 _AWAIT = "OK, send me your updates by 09:00."
 _ASK_CHANGE = "What should I change instead?"
@@ -18,9 +18,10 @@ def on_button(store, brain, chat, clock, update) -> str:
     return _HANDLERS[update.callback_data](store, brain, chat, clock, checkin)
 
 
-def after_message(store, brain, chat, clock) -> None:
+def after_message(store, brain, chat, clock, kick=lambda: None) -> None:
     if checkin_state.claim(store, {"awaiting_updates"}):
-        reconcile.run(store, brain, chat, clock)
+        queue.push(store, chat, "reconcile", {})
+        kick()
 
 
 def _no(store, brain, chat, clock, checkin) -> str:
@@ -30,7 +31,7 @@ def _no(store, brain, chat, clock, checkin) -> str:
 
 
 def _yes(store, brain, chat, clock, checkin) -> str:
-    return reconcile.run(store, brain, chat, clock)
+    return queue.push(store, chat, "reconcile", {})  # handle_update kicks the executor after any button
 
 
 def _approve(store, brain, chat, clock, checkin) -> str:

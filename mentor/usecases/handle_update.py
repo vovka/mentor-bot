@@ -1,4 +1,7 @@
-"""handle_update use case: dedup Telegram updates by update_id, then route a button press or a message."""
+"""handle_update use case: dedup Telegram updates by update_id, then route /cancel, a button press or a message."""
+
+import os
+import signal
 
 from mentor.adapters.store.lock import locked
 from mentor.domain.conversation import Update
@@ -13,6 +16,9 @@ def run(store, brain, chat, clock, update: Update, renderer=None, kick=lambda: N
         state["last_update_id"] = update.update_id
         store.write_state(state)
 
+    if update.text.strip() == "/cancel":
+        chat.send(_cancel(state.get("executor_pid")))
+        return
     if update.callback_data.startswith("t:"):
         task_buttons.on_button(store, chat, update, kick)
         return
@@ -24,4 +30,15 @@ def run(store, brain, chat, clock, update: Update, renderer=None, kick=lambda: N
         return
 
     handle_message.run(store, brain, chat, clock, update.text, update.message_id, renderer, kick)
-    checkin.after_message(store, brain, chat, clock)
+    checkin.after_message(store, brain, chat, clock, kick)
+
+
+def _cancel(pid) -> str:
+    """SIGTERM makes the executor kill its running brain CLI; the job or task then fails normally."""
+    if not pid:
+        return "Nothing is running."
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return "Nothing is running."
+    return "Cancelling the current job."

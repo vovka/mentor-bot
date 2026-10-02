@@ -5,17 +5,16 @@ from pathlib import Path
 
 from mentor.domain.actions import BrainTask
 from mentor.domain.settings import ALLOWED, BrainSettings
-from mentor.usecases import add_project, change_settings, send_files, send_image, task_update
+from mentor.usecases import add_project, add_task, change_settings, queue, send_files, send_image, task_update
 from mentor.usecases.busy import busy
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "mentor.md"
 
 
-def _dispatch_replan(services, brain, chat, clock, args):
-    replan = importlib.import_module("mentor.usecases.replan")
-    result = replan.run(services.store, brain, chat, clock, args.get("reason", ""))
-    services.kick()  # the worker exits quietly when nothing is ready
-    return result
+def _dispatch_replan(services, chat, args):
+    line = queue.push(services.store, chat, "replan", {"reason": args.get("reason") or ""})
+    services.kick()
+    return line
 
 
 def _dispatch_work(services):
@@ -31,7 +30,8 @@ def _dispatch_scout(store, brain, chat, clock, args):
 _DISPATCH = {
     "set_settings": lambda s, brain, chat, clock, args: change_settings.run(s.store, args),
     "add_project": lambda s, brain, chat, clock, args: add_project.run(s.store, args),
-    "replan": lambda s, brain, chat, clock, args: _dispatch_replan(s, brain, chat, clock, args),
+    "replan": lambda s, brain, chat, clock, args: _dispatch_replan(s, chat, args),
+    "add_task": lambda s, brain, chat, clock, args: add_task.run(s.store, chat, s.kick, args),
     "scout": lambda s, brain, chat, clock, args: _dispatch_scout(s.store, brain, chat, clock, args),
     "send_image": lambda s, brain, chat, clock, args: send_image.run(s.renderer, chat, args),
     "work": lambda s, brain, chat, clock, args: _dispatch_work(s),
@@ -62,7 +62,7 @@ def _build_task(store, clock, text: str) -> BrainTask:
     return BrainTask(prompt=prompt, cwd=str(store.data_dir), write=False, settings=brain_settings)
 
 
-_HEAVY = {"replan", "scout"}
+_HEAVY = {"scout"}
 
 
 def run(store, brain, chat, clock, text: str, message_id: int = 0, renderer=None, kick=lambda: None) -> str:

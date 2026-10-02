@@ -7,7 +7,7 @@ from mentor.adapters.telegram.fake import FakeChat
 from mentor.domain.actions import BrainResult
 from mentor.domain import tasks
 from mentor.domain.conversation import Update
-from mentor.usecases import handle_update, morning_checkin
+from mentor.usecases import handle_update, morning_checkin, work
 from tests.fixed_clock import FixedClock
 
 _DOC = json.dumps({"tasks": [{"id": "a-1", "title": "do A today"}]})
@@ -27,7 +27,14 @@ def _setup(tmp_path, results, history="bot: yesterday's brief\n"):
 def _press(env, data, message_id, update_id):
     store, brain, chat, clock = env
     update = Update(update_id, 1, "", datetime.now(), message_id, callback_data=data, callback_id=f"cb{update_id}")
-    handle_update.run(store, brain, chat, clock, update)
+    handle_update.run(store, brain, chat, clock, update, kick=lambda: work.drain_jobs(store, brain, chat, clock))
+
+
+def _drained(job, store, brain, chat, clock):
+    """Run a check-in job, then the queued reconcile the executor would pick up."""
+    result = job(store, brain, chat, clock)
+    work.drain_jobs(store, brain, chat, clock)
+    return result
 
 
 def _checkin(store):
@@ -36,7 +43,7 @@ def _checkin(store):
 
 def test_no_updates_asks_with_yes_no_buttons(tmp_path):
     store, brain, chat, clock = _setup(tmp_path, [])
-    morning_checkin.morning(store, brain, chat, clock)
+    _drained(morning_checkin.morning, store, brain, chat, clock)
     assert chat.outbox == [morning_checkin.QUESTION]
     assert chat.buttons[1] == [("Yes", "yes"), ("No", "no")]
     assert _checkin(store) == {"date": "2026-09-30", "stage": "asked", "message_id": 1}
@@ -46,10 +53,10 @@ def test_no_updates_asks_with_yes_no_buttons(tmp_path):
 def test_yes_proposes_without_touching_plan(tmp_path):
     env = _setup(tmp_path, [_PROPOSAL])
     store, brain, chat, clock = env
-    morning_checkin.morning(store, brain, chat, clock)
+    _drained(morning_checkin.morning, store, brain, chat, clock)
     _press(env, "yes", 1, 1)
     assert chat.outbox[-1] == "moved A to today"
-    assert chat.buttons[2] == [("Approve", "approve"), ("Reject", "reject")]
+    assert chat.buttons[3] == [("Approve", "approve"), ("Reject", "reject")]
     assert chat.answered == ["cb1"] and chat.cleared == [1]
     assert store.read_plan() == "# old plan\n"
     assert _checkin(store)["stage"] == "proposed"
@@ -59,9 +66,9 @@ def test_yes_proposes_without_touching_plan(tmp_path):
 def test_approve_writes_plan_edits_pin_sends_brief(tmp_path):
     env = _setup(tmp_path, [_PROPOSAL, _BRIEF])
     store, brain, chat, clock = env
-    morning_checkin.morning(store, brain, chat, clock)
+    _drained(morning_checkin.morning, store, brain, chat, clock)
     _press(env, "yes", 1, 1)
-    _press(env, "approve", 2, 2)
+    _press(env, "approve", 3, 2)  # 2 is the queued-reconcile message
     assert [t.title for t in store.read_tasks()] == ["do A today"]
     assert store.read_plan() == tasks.render(store.read_tasks())
     assert chat.edits == [(99, store.read_plan())]
@@ -72,9 +79,9 @@ def test_approve_writes_plan_edits_pin_sends_brief(tmp_path):
 def test_reject_leaves_plan_and_asks_what_to_change(tmp_path):
     env = _setup(tmp_path, [_PROPOSAL])
     store, brain, chat, clock = env
-    morning_checkin.morning(store, brain, chat, clock)
+    _drained(morning_checkin.morning, store, brain, chat, clock)
     _press(env, "yes", 1, 1)
-    _press(env, "reject", 2, 2)
+    _press(env, "reject", 3, 2)
     assert store.read_plan() == "# old plan\n"
     assert chat.outbox[-1] == "What should I change instead?"
     assert _checkin(store) is None
@@ -83,10 +90,11 @@ def test_reject_leaves_plan_and_asks_what_to_change(tmp_path):
 def test_no_then_message_reconciles(tmp_path):
     env = _setup(tmp_path, [BrainResult(reply="noted", actions=[], raw={}), _PROPOSAL])
     store, brain, chat, clock = env
-    morning_checkin.morning(store, brain, chat, clock)
+    _drained(morning_checkin.morning, store, brain, chat, clock)
     _press(env, "no", 1, 1)
     assert chat.outbox[-1] == "OK, send me your updates by 09:00."
-    handle_update.run(store, brain, chat, clock, Update(2, 1, "did A, not B", datetime.now()))
+    kick = lambda: work.drain_jobs(store, brain, chat, clock)  # noqa: E731
+    handle_update.run(store, brain, chat, clock, Update(2, 1, "did A, not B", datetime.now()), kick=kick)
     assert chat.outbox[-2:] == ["noted", "moved A to today"]
     assert _checkin(store)["stage"] == "proposed"
 
@@ -94,8 +102,8 @@ def test_no_then_message_reconciles(tmp_path):
 def test_deadline_reconciles_when_pending_else_noop(tmp_path):
     store, brain, chat, clock = _setup(tmp_path, [_PROPOSAL])
     assert morning_checkin.deadline(store, brain, chat, clock) == "no pending check-in"
-    morning_checkin.morning(store, brain, chat, clock)
-    morning_checkin.deadline(store, brain, chat, clock)
+    _drained(morning_checkin.morning, store, brain, chat, clock)
+    _drained(morning_checkin.deadline, store, brain, chat, clock)
     assert chat.outbox[-2:] == [morning_checkin.DEADLINE_NOTICE, "moved A to today"]
     assert morning_checkin.deadline(store, brain, chat, clock) == "no pending check-in"
 
@@ -103,7 +111,7 @@ def test_deadline_reconciles_when_pending_else_noop(tmp_path):
 def test_stale_button_is_already_handled(tmp_path):
     env = _setup(tmp_path, [_PROPOSAL])
     store, brain, chat, clock = env
-    morning_checkin.morning(store, brain, chat, clock)
+    _drained(morning_checkin.morning, store, brain, chat, clock)
     _press(env, "yes", 1, 1)
     _press(env, "no", 1, 2)
     _press(env, "approve", 7, 3)
@@ -113,7 +121,7 @@ def test_stale_button_is_already_handled(tmp_path):
 
 def test_updates_with_empty_proposal_send_plain_brief(tmp_path):
     store, brain, chat, clock = _setup(tmp_path, [_NOTHING, _BRIEF], history="user: done A\nbot: great\n")
-    morning_checkin.morning(store, brain, chat, clock)
+    _drained(morning_checkin.morning, store, brain, chat, clock)
     assert chat.outbox == ["good morning"]
     assert _checkin(store) is None
 
@@ -121,7 +129,7 @@ def test_updates_with_empty_proposal_send_plain_brief(tmp_path):
 def test_invalid_proposal_is_dropped_with_error_then_brief(tmp_path):
     bad = BrainResult(reply="moved A", actions=[], raw={}, document="{nope")
     store, brain, chat, clock = _setup(tmp_path, [bad, _BRIEF], history="user: done A\n")
-    morning_checkin.morning(store, brain, chat, clock)
+    _drained(morning_checkin.morning, store, brain, chat, clock)
     assert chat.outbox[-2].startswith("Plan proposal discarded: invalid JSON")
     assert chat.outbox[-1] == "good morning"
     assert _checkin(store) is None and store.read_tasks() == []
@@ -133,11 +141,11 @@ def test_ops_proposal_is_applied_on_approve_to_current_tasks(tmp_path):
     env = _setup(tmp_path, [proposal, _BRIEF])
     store, brain, chat, clock = env
     store.write_tasks([tasks.Task("a-1", "A")])
-    morning_checkin.morning(store, brain, chat, clock)
+    _drained(morning_checkin.morning, store, brain, chat, clock)
     _press(env, "yes", 1, 1)
     assert _checkin(store)["document"] == ops and store.read_tasks()[0].due == ""
     store.write_tasks([*store.read_tasks(), tasks.Task("b-1", "B")])
-    _press(env, "approve", 2, 2)
+    _press(env, "approve", 3, 2)  # 2 is the queued-reconcile message
     assert [(t.id, t.due) for t in store.read_tasks()] == [("a-1", "2026-09-30"), ("b-1", "")]
 
 
@@ -146,6 +154,12 @@ def test_ops_proposal_failing_the_dry_run_is_discarded(tmp_path):
     bad = BrainResult(reply="x", actions=[], raw={}, document=ops)
     store, brain, chat, clock = _setup(tmp_path, [bad, _BRIEF], history="user: done A\n")
     store.write_tasks([tasks.Task("a-1", "A")])
-    morning_checkin.morning(store, brain, chat, clock)
+    _drained(morning_checkin.morning, store, brain, chat, clock)
     assert "Plan proposal discarded: task a-1: unknown dep ghost" in chat.outbox
     assert _checkin(store) is None
+
+
+def test_checkin_reconcile_is_queued_not_run(tmp_path):
+    store, brain, chat, clock = _setup(tmp_path, [], history="user: done A\n")
+    assert morning_checkin.morning(store, brain, chat, clock) == "Reconciling the plan queued (1st in line)."
+    assert [j["kind"] for j in store.read_state()["jobs"]] == ["reconcile"] and brain.tasks == []

@@ -8,11 +8,12 @@
       "items": {
         "type": "object",
         "properties": {
-          "kind": { "type": "string", "enum": ["replan", "scout", "set_settings", "add_project", "send_image", "work", "task_update", "task_result", "send_files"] },
+          "kind": { "type": "string", "enum": ["replan", "scout", "set_settings", "add_project", "send_image", "work", "task_update", "task_result", "send_files", "add_task"] },
           "args": {
             "type": "object",
             "properties": {
               "reason": { "type": ["string", "null"] },
+              "title": { "type": ["string", "null"] },
               "project": { "type": ["string", "null"] },
               "question": { "type": ["string", "null"] },
               "provider": { "type": ["string", "null"] },
@@ -41,7 +42,7 @@
                 }
               }
             },
-            "required": ["reason", "project", "question", "provider", "model", "effort", "tier", "name", "repo_path", "diagram", "caption", "task_id", "status", "note", "outcome", "files", "send", "user_action", "proposal", "drafts"],
+            "required": ["reason", "title", "project", "question", "provider", "model", "effort", "tier", "name", "repo_path", "diagram", "caption", "task_id", "status", "note", "outcome", "files", "send", "user_action", "proposal", "drafts"],
             "additionalProperties": false
           }
         },

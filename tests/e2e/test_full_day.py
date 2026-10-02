@@ -4,6 +4,7 @@ Wires the real handle_update/morning_brief/replan use cases the way mentor.app.c
 does, but with FakeBrain and a TelegramChat pointed at BotApiStub via TELEGRAM_API_BASE.
 """
 
+import json
 import shutil
 from datetime import date, datetime
 from pathlib import Path
@@ -15,7 +16,7 @@ from mentor.adapters.telegram.api import TelegramChat
 from mentor.app.container import Container
 from mentor.domain.actions import Action, BrainResult
 from mentor.domain.conversation import Update
-from mentor.usecases import handle_update, morning_brief
+from mentor.usecases import handle_update, morning_brief, work
 from tests.e2e.bot_api_stub import BotApiStub
 from tests.fixed_clock import FixedClock
 
@@ -32,6 +33,9 @@ def _build_container(tmp_path, stub, monkeypatch) -> Container:
     shutil.copytree(_TEMPLATE, store.data_dir / "projects" / "_template")
     store.add_project("alpha", "/repo/alpha")
     store.add_project("beta", "/repo/beta")
+    # no task budget: the inline executor runs queued jobs only (jobs don't count against daily_runs)
+    settings = store.read_settings()
+    (tmp_path / "settings.json").write_text(json.dumps({**settings, "work": {"daily_runs": 0}}))
     chat = TelegramChat("stub-token", str(stub.chat_id))
     clock = FixedClock(datetime(2026, 9, 29, 8, 0))
     return Container(store=store, brain=FakeBrain([]), chat=chat, clock=clock, renderer=FakeRenderer(b"PNG"))
@@ -44,10 +48,15 @@ def _step(container, stub, offset, text, results):
     for update in container.chat.poll(offset):
         handle_update.run(
             container.store, container.brain, container.chat, container.clock, update,
-            renderer=container.renderer,
+            renderer=container.renderer, kick=lambda: _executor(container),
         )
         offset = update.update_id + 1
     return offset
+
+
+def _executor(c):
+    """kick() inline: the work loop drains the queue in this process instead of a background one."""
+    work.run(c.store, c.brain, c.chat, c.clock)
 
 
 def _replan_results(reply: str, document: str) -> list[BrainResult]:

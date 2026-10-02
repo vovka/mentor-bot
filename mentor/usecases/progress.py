@@ -21,17 +21,20 @@ _STATUS = {
 
 class Progress:
     def __init__(self, chat, title: str, model_line: str, steps_path: Path | None = None,
-                 interval: float = 10, now=time.monotonic):
+                 interval: float = 10, now=time.monotonic, message_id: int | None = None):
         self._chat, self._title, self._model_line = chat, title, model_line
         self._path, self._interval, self._now = steps_path, interval, now
         self._steps: list[str] = []
         self._lock = threading.Lock()
         self._stop = threading.Event()
-        self._id = None
+        self._id = message_id  # set: adopt that message (e.g. a queued job's) instead of sending one
         self._started = now()
 
     def start(self) -> None:
-        self._id = self._safely(self._chat.send_html, self.render())
+        if self._id is None:
+            self._id = self._safely(self._chat.send_html, self.render())
+        else:
+            self._safely(self._chat.edit_html, self._id, self.render())
         threading.Thread(target=self._tick, daemon=True).start()
 
     def step(self, line: str) -> None:
@@ -82,9 +85,9 @@ def model_line(kind: str, settings) -> str:
     return f"{kind} · {settings.provider} {settings.model} · effort {settings.effort}"
 
 
-def tracked(chat, brain, task, title: str, kind: str):
+def tracked(chat, brain, task, title: str, kind: str, message_id: int | None = None):
     """brain.run with a progress message that ends as a short Done/Failed; the reply flow is the caller's."""
-    progress = Progress(chat, title, model_line(kind, task.settings))
+    progress = Progress(chat, title, model_line(kind, task.settings), message_id=message_id)
     progress.start()
     try:
         result = brain.run(replace(task, on_step=progress.step))

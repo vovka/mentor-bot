@@ -12,7 +12,7 @@ _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "repl
 _NO_TASKS = "(none yet — convert the legacy plan below into tasks)"
 
 
-def run(store, brain, chat, clock, reason: str) -> str:
+def run(store, brain, chat, clock, reason: str, message_id: int | None = None) -> str:
     today = clock.now().date()
     task = BrainTask(
         prompt=_build_prompt(store, today, reason),
@@ -20,7 +20,7 @@ def run(store, brain, chat, clock, reason: str) -> str:
         write=False,
         settings=tier(store.read_settings(), "plan"),
     )
-    result = progress.tracked(chat, brain, task, "Replanning", "replan")
+    result = progress.tracked(chat, brain, task, "Replanning", "replan", message_id)
 
     marks = {"last_replan": today.isoformat()}
     if not result.document:

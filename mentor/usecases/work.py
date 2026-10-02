@@ -1,4 +1,5 @@
-"""Autonomous work loop: take the next ready task, do it (or park it), report, repeat until done or out of budget."""
+"""The single executor: drain queued jobs (replan, reconcile) first, then do the next ready task (or park it),
+report, repeat until nothing is left or the daily budget is used. Jobs don't count against the budget."""
 
 from dataclasses import replace
 
@@ -6,7 +7,7 @@ from mentor.adapters.store.lock import locked
 from mentor.domain import tasks
 from mentor.domain.actions import BrainResult
 from mentor.domain.settings import work_limits
-from mentor.usecases import apply_plan, work_brain, work_result
+from mentor.usecases import apply_plan, queue, reconcile, replan, work_brain, work_result
 from mentor.usecases.progress import Progress, model_line
 
 _BUDGET = "daily budget used"
@@ -16,6 +17,7 @@ def run(store, brain, chat, clock, mail=None) -> str:
     _reset_stale(store)
     touched: list[str] = []
     while True:
+        drain_jobs(store, brain, chat, clock)
         task = _claim(store, clock)
         if not isinstance(task, tasks.Task):
             break
@@ -26,6 +28,37 @@ def run(store, brain, chat, clock, mail=None) -> str:
     chat.send(summary)
     apply_plan.refresh(store, chat)
     return summary
+
+
+def drain_jobs(store, brain, chat, clock) -> None:
+    """Run every queued job in order; jobs preempt tasks, so this runs before each task claim."""
+    while True:
+        _drop_exhausted(store, chat)
+        job = queue.take(store)
+        if job is None:
+            return
+        _run_job(store, brain, chat, clock, job)
+
+
+def _drop_exhausted(store, chat) -> None:
+    """A job taken twice without finishing crashed the executor twice: give up on it."""
+    for job in queue.pending(store):
+        if job["attempts"] >= 2:
+            queue.done(store, job["id"])
+            chat.send(f"Gave up on {queue.LABELS[job['kind']].lower()} after {job['attempts']} attempts.")
+
+
+def _run_job(store, brain, chat, clock, job) -> None:
+    mid = job.get("message_id")
+    try:
+        if job["kind"] == "replan":
+            chat.send(replan.run(store, brain, chat, clock, job["args"].get("reason") or "", message_id=mid))
+        else:
+            reconcile.run(store, brain, chat, clock, message_id=mid)
+    except Exception as error:  # left queued: retried once, then dropped by _drop_exhausted
+        print(f"work: job {job['id']} failed: {error}")
+        return
+    queue.done(store, job["id"])
 
 
 def _reset_stale(store) -> None:

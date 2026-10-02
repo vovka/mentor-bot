@@ -5,14 +5,14 @@ from pathlib import Path
 
 from mentor.domain.actions import BrainTask
 from mentor.domain.settings import tier
-from mentor.usecases import apply_plan, checkin_state, morning_brief
+from mentor.usecases import apply_plan, checkin_state, morning_brief, progress
 from mentor.usecases.replan import current_tasks
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "reconcile.md"
 BUTTONS = [("Approve", "approve"), ("Reject", "reject")]
 
 
-def run(store, brain, chat, clock) -> str:
+def run(store, brain, chat, clock, message_id: int | None = None) -> str:
     today = clock.now().date()
     task = BrainTask(
         prompt=_build_prompt(store, today),
@@ -20,7 +20,7 @@ def run(store, brain, chat, clock) -> str:
         write=False,
         settings=tier(store.read_settings(), "plan"),
     )
-    result = brain.run(task)
+    result = progress.tracked(chat, brain, task, "Reconciling the plan", "reconcile", message_id)
     error = _invalid(store, result.document)
     if error or not result.document:
         checkin_state.save(store, None)
