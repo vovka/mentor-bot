@@ -1,7 +1,7 @@
 # Mentor assistant bot — architecture
 
-Status 2026-10-02: built, 191 tests, live-tested, running as a systemd user service.
-Published page with the same diagrams: https://claude.ai/artifact/Kz2GVi8aQ5SpxxtQVg1HFD
+Status 2026-10-02: built, 220 tests, live-tested, running as a systemd user service.
+Published page (snapshot of 2026-09-30, before the task graph and queue; this file is current): https://claude.ai/artifact/Kz2GVi8aQ5SpxxtQVg1HFD
 
 ## 1. What it is
 
@@ -231,9 +231,11 @@ runtime fields (`files`, `approved`, `provider`, `proposal`) and non-final statu
 
 `state.json["jobs"]` is a durable list of `replan {reason}` jobs (`usecases/queue.py`). Reconcile is not
 queued: it only proposes ops (Approve applies them under the lock), so it runs where it is triggered and the
-brief never waits behind a task. `push` posts `🕒 Queued (2nd): Replanning` as a reply, then appends the job
-with that message id under `data/.lock`; the executor adopts that
-message as its progress message. Ad-hoc user work is not a job: the chat action `add_task` inserts a task at the
+brief never waits behind a task. A chat replan is enqueued at once under `data/.lock` (so its position and
+its order against any kick in the same answer are right); after the chat answer is sent, `announce` posts
+`🕒 Queued (2nd): Replanning` as a reply and stores its id if the job is still untaken. The executor adopts that
+message as its progress message (or sends its own if it got there first). Every executor message for a job
+(summary, "Plan not changed", patch notes, "Gave up on …") replies to the requesting message. Ad-hoc user work is not a job: the chat action `add_task` inserts a task at the
 top of `tasks.json` and kicks the executor, so it is the next ready task. Task `kind` only routes the model tier.
 `take` counts attempts; a job taken twice without finishing is dropped with "Gave up on …".
 
@@ -295,7 +297,7 @@ flowchart TB
 Progress message (`usecases/progress.py`): each worker run, replan and scout posts one HTML message
 (`Chat.send_html`) — `⏳ title`, `kind · provider model · effort E · elapsed`, the step log in a
 `<blockquote>` — re-rendered every 10 s by a daemon thread (`edit_html`). On finish the same message
-becomes `✅ Done` / `🟡 Prepared` / `🟠 Needs approval` / `❌ Failed`, total time, the log collapsed
+becomes `✅ Done` / `🟡 Prepared` / `🟠 Needs approval` / `❌ Failed` / `⚪ Cancelled` (after `/cancel`), total time, the log collapsed
 (`<blockquote expandable>`) and, for worker tasks, the brief plus the files list; replan and scout end
 with just the status and keep their usual reply. It stays under 4096 chars: older steps are counted as
 "(N earlier steps in steps.md)", a long brief is cut with "…" (full text in `report.md`). Every step

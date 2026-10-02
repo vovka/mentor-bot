@@ -1,3 +1,6 @@
+> Historical: the original implementation plan (2026-09-29). The current design is in
+> [ARCHITECTURE.md](ARCHITECTURE.md).
+
 # Mentor bot — implementation plan (Option B, Codex default)
 
 ## Context
