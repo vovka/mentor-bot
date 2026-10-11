@@ -22,7 +22,7 @@ def test_new_session_is_seeded_then_resumed(tmp_path):
     assert not first.session and "User is job hunting." in first.prompt and "t1 Send CV" in first.prompt
     assert first.tier.model == "gpt-5.6-luna" and first.role == "chat"
     assert turn.run(["[10:01] you: and?"]) == "again"
-    assert codex.requests[1].session == "s1" and codex.requests[1].prompt == "[10:01] you: and?"
+    assert codex.requests[1].session == "s1" and codex.requests[1].prompt == "[10:01] you: and?\n(Reply in English.)"
 
 
 def test_usage_limit_moves_the_day_to_the_fallback(tmp_path):
@@ -49,3 +49,10 @@ def test_failure_is_reported_not_raised(tmp_path):
     store, turn = _turn(tmp_path, FakeAgent(AgentResult("", "", error="boom")))
     assert turn.run(["x"]).startswith("⚠️ chat agent failed: boom")
     assert store.read_state()["chat"]["session"] == ""
+
+
+def test_language_hint_follows_the_latest_user_line():
+    from mentor.usecases.chat_turn import language_hint
+    assert language_hint(["[1] you: Привіт", "[2] you: add a task"]) == "\n(Reply in English.)"
+    assert language_hint(["[1] you: додай задачу"]) == "\n(Reply in Ukrainian. Never Russian.)"
+    assert "Never Russian" in language_hint(["[job 1 finished] x"])

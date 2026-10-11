@@ -34,7 +34,9 @@ class CodexAgent:
         flags = ["--json", "--skip-git-repo-check", "-m", r.tier.model,
                  "-c", f"model_reasoning_effort={json.dumps(r.tier.effort)}", "-c", 'approval_policy="never"',
                  "-c", "web_search=\"live\"", *_mcp_flags(r.role)]
-        if not r.user_tools:
+        if r.user_tools:
+            flags += [part for name in _UNSAFE_MCP for part in ("-c", f"mcp_servers.{name}.enabled=false")]
+        else:
             flags.append("--ignore-user-config")  # chat: no user MCPs/plugins, ~4 s per turn instead of ~17 s
         flags += _sandbox_flags(r)
         return head + flags + ["--", r.prompt]
@@ -65,7 +67,6 @@ def _mcp_flags(role: str) -> list[str]:
     flags = [f"{prefix}command={json.dumps(command)}", f"{prefix}args={json.dumps(args)}",
              f"{prefix}cwd={json.dumps(cwd)}", f'{prefix}default_tools_approval_mode="approve"',
              f"{prefix}env={_toml_table(env)}", f"{prefix}tool_timeout_sec=120"]
-    flags += [f"mcp_servers.{name}.enabled=false" for name in _UNSAFE_MCP]
     return [part for flag in flags for part in ("-c", flag)]
 
 

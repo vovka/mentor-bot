@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
-from mentor.adapters.telegram.markdown import chunk
+from mentor.adapters.telegram.markdown import chunk, to_html
 from mentor.domain.conversation import Update
 
 _CALL_TIMEOUT = 10
@@ -36,11 +36,18 @@ class TelegramChat:
         parts = chunk(text)
         msg_id = 0
         for i, part in enumerate(parts):
-            params = {"chat_id": self._chat_id, "text": part, **_reply(reply_to if i == 0 else None)}
+            params = {"chat_id": self._chat_id, "text": to_html(part), "parse_mode": "HTML",
+                      **_reply(reply_to if i == 0 else None)}
             if buttons and i == len(parts) - 1:
                 row = [{"text": label, "callback_data": data} for label, data in buttons]
                 params["reply_markup"] = {"inline_keyboard": [row]}
-            msg_id = self._call("sendMessage", params, _CALL_TIMEOUT)["result"]["message_id"]
+            try:
+                msg_id = self._call("sendMessage", params, _CALL_TIMEOUT)["result"]["message_id"]
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:  # 400 = Telegram rejected the HTML: send the chunk as it was written
+                    raise
+                params.update(text=part, parse_mode=None)
+                msg_id = self._call("sendMessage", params, _CALL_TIMEOUT)["result"]["message_id"]
         return msg_id
 
     def answer_callback(self, callback_id: str) -> None:
@@ -89,11 +96,10 @@ class TelegramChat:
         )
 
     def react(self, message_id: int, emoji: str | None) -> None:
+        """Raises on failure: callers decide whether a missing or stuck reaction matters."""
         reaction = [{"type": "emoji", "emoji": emoji}] if emoji else []
-        self._call_quietly(
-            "setMessageReaction",
-            {"chat_id": self._chat_id, "message_id": message_id, "reaction": reaction},
-        )
+        self._call("setMessageReaction", {"chat_id": self._chat_id, "message_id": message_id, "reaction": reaction},
+                   _CALL_TIMEOUT)
 
     def typing(self) -> None:
         self._call_quietly("sendChatAction", {"chat_id": self._chat_id, "action": "typing"})

@@ -33,7 +33,7 @@ class ChatTurn:
         return result.text if result.ok else f"⚠️ chat agent failed: {result.error[:300]}"
 
     def _turn(self, name: str, settings: dict, session: str, lines: list[str]):
-        prompt = "\n".join(lines) if session else self.seed(lines)
+        prompt = ("\n".join(lines) if session else self.seed(lines)) + language_hint(lines)
         return self.agents.run(AgentRun(prompt, tier(settings, name), self.cwd, role="chat", session=session))
 
     def seed(self, lines: list[str]) -> str:
@@ -47,3 +47,14 @@ class ChatTurn:
             parts.append("## Earlier today\n" + "\n".join(earlier[-200:]))
         parts.append("## New messages\n" + "\n".join(lines))
         return "\n\n".join(parts)
+
+
+def language_hint(lines: list[str]) -> str:
+    """luna drifts into Russian after tool calls; pin the reply language every turn. The user never wants Russian."""
+    said = [line.split(" you: ", 1)[1] for line in lines if " you: " in line]
+    letters = [c for c in (said[-1] if said else "") if c.isalpha()]
+    if not letters:
+        return "\n(Reply in English unless the user wrote Ukrainian. Never Russian.)"
+    if sum(c.isascii() for c in letters) / len(letters) > 0.8:
+        return "\n(Reply in English.)"
+    return "\n(Reply in Ukrainian. Never Russian.)"

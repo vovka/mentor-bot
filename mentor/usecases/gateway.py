@@ -4,7 +4,9 @@ Whatever arrives while a turn runs is batched into the next turn, so the agent s
 """
 
 import queue
+import sys
 import threading
+import time
 from datetime import datetime
 
 _TYPING_EVERY = 4  # seconds; Telegram drops the indicator after ~5
@@ -20,7 +22,10 @@ class Gateway:
         if not update.text:
             return
         self._receive(f"you: {update.text}", update.message_id)
-        self.chat.react(update.message_id, "👀")
+        try:
+            self.chat.react(update.message_id, "👀")
+        except Exception:  # only an indicator
+            pass
 
     def check_jobs(self) -> None:
         for line in self.announce():
@@ -35,15 +40,18 @@ class Gateway:
             stop.wait(_SETTLE)
             while not self.inbox.empty():
                 batch.append(self.inbox.get_nowait())
-            self.answer(batch)
+            try:
+                self.answer(batch)
+            except Exception as exc:  # the worker must outlive any single failed turn
+                print(f"chat turn error: {exc}", file=sys.stderr)
 
     def answer(self, batch: list[tuple[str, int | None]]) -> None:
         reply = self._with_typing(lambda: self.turn.run([line for line, _ in batch]))
         message_ids = [m for _, m in batch if m]
-        self.chat.send(reply or "(no reply)", reply_to=message_ids[-1] if message_ids else None)
         self.store.append_history(_stamp(f"mentor: {reply}"))
+        _retry(lambda: self.chat.send(reply or "(no reply)", reply_to=message_ids[-1] if message_ids else None))
         for message_id in message_ids:
-            self.chat.react(message_id, None)
+            _retry(lambda: self.chat.react(message_id, None))
 
     def _receive(self, text: str, message_id: int | None) -> None:
         line = _stamp(text)
@@ -65,6 +73,17 @@ class Gateway:
             return f"⚠️ chat turn crashed: {exc}"
         finally:
             done.set()
+
+
+def _retry(call, attempts: int = 3, pause: float = 3):
+    """Telegram calls fail now and then on a flaky network (TLS handshake timeouts): try again before giving up."""
+    for attempt in range(attempts):
+        try:
+            return call()
+        except Exception:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(pause)
 
 
 def _stamp(text: str) -> str:

@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 
 from mentor.adapters.agent.mentor_mcp import REPO
-from mentor.adapters.agent.secrets import deny_paths
+from mentor.adapters.agent.secrets import deny_paths, scrub_env
 from mentor.app.config import Config
 from mentor.app.container import build
 from mentor.usecases import job_announce, job_run, jobs
@@ -37,10 +37,12 @@ def main(argv: list[str] | None = None) -> None:
         from mentor.mcp import server, tools
         server.serve(tools.build(args.role, container.store, container.book, container.renderer, container.chat))
     elif args.command == "job-run":
+        scrub_env(os.environ)
         job_run.run(args.job_id, container.store, container.book, container.agents, deny_paths())
     elif args.command == "morning":
         from mentor.usecases import morning
-        morning.run(container.store, container.chat, container.agents, str(REPO), wait=not args.now)
+        c = container
+        morning.run(c.store, c.book, c.chat, c.agents, str(REPO), wait=not args.now)
     elif args.command == "migrate":
         from mentor.usecases import migrate
         print(migrate.run(args.step, container.store, container.chat, container.agents, str(REPO)))

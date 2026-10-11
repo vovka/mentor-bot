@@ -1,8 +1,8 @@
 [Unit]
-Description=Mentor bot: morning brief job
+Description=Mentor bot: morning summary, task ranking and 08:00 priorities post
 
 [Service]
 Type=oneshot
 WorkingDirectory=%h/dev/mentor-bot
 EnvironmentFile=%h/dev/mentor-bot/.env
-ExecStart=%h/dev/mentor-bot/.venv/bin/mentor job morning
+ExecStart=%h/dev/mentor-bot/.venv/bin/mentor morning

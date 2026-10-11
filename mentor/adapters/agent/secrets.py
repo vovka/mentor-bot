@@ -33,10 +33,23 @@ def _scan(root: Path) -> list[str]:
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
         hits += [os.path.join(folder, d) for d in dirs if d == ".secrets"]
         hits += [os.path.join(folder, f) for f in files if _secret(f)]
-    return hits
+    # codex refuses to deny a symlink ("crosses writable symlink"): deny its target instead
+    return [os.path.realpath(h) for h in hits]
 
 
 def _secret(name: str) -> bool:
     if name.startswith(".env"):
         return not name.endswith((".example", ".sample", ".template"))
     return name in _NAMES or name.endswith(_SUFFIXES)
+
+
+_SECRET_ENV = ("TOKEN", "SECRET", "PASSWORD", "API_KEY", "PRIVATE_KEY")
+
+
+def scrub_env(env) -> None:
+    """For the job runner process and everything it starts: no tokens, no SSH agent, no git over ssh."""
+    for name in list(env):
+        if name == "SSH_AUTH_SOCK" or any(word in name.upper() for word in _SECRET_ENV):
+            del env[name]
+    env["GIT_SSH_COMMAND"] = "false"
+    env["GIT_TERMINAL_PROMPT"] = "0"

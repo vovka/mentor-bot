@@ -34,3 +34,11 @@ def test_chunk_splits_an_oversized_single_line():
 
 def test_chunk_empty_text_returns_single_empty_chunk():
     assert chunk("") == [""]
+
+
+def test_to_html():
+    from mentor.adapters.telegram.markdown import to_html
+    assert to_html("**Aim** a<b & *soon* `x<y` [site](https://a.b/c)") == (
+        '<b>Aim</b> a&lt;b &amp; <i>soon</i> <code>x&lt;y</code> <a href="https://a.b/c">site</a>')
+    assert to_html("## Plan\n- 2*3*4 snake_case_name") == "<b>Plan</b>\n- 2*3*4 snake_case_name"
+    assert to_html("```py\nif a<b:\n```") == "<pre>if a&lt;b:</pre>"

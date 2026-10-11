@@ -30,7 +30,7 @@ Everything you leave unfinished on purpose goes into `your_move`.
 - Use the browser and other tools you have when the task needs the web or a logged-in site.
 
 ## Report
-Finish by writing `{JOB_DIR}/result.json` (valid JSON, in the language the brief is written in):
+Finish by writing `{JOB_DIR}/result.json` (valid JSON, in English unless the brief is in Ukrainian; never Russian):
 {"status": "done" | "failed",
  "summary": "what you did and what the result is, a few short sentences",
  "assumptions": ["each assumption you made"],
