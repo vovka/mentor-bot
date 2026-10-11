@@ -15,6 +15,7 @@ from mentor.app.container import build
 from mentor.usecases import job_announce, job_run, jobs
 from mentor.usecases.chat_turn import ChatTurn
 from mentor.usecases.gateway import Gateway
+from mentor.usecases.job_progress import JobProgress
 
 _JOB_POLL = 2  # seconds between job checks
 _children: list[subprocess.Popen] = []  # job runners, polled so they do not linger as zombies
@@ -57,9 +58,10 @@ def serve(container, stop: threading.Event | None = None) -> None:
             signal.signal(sig, lambda *_: stop.set())
     roots = [Path(p).expanduser().resolve() for p in job_run.WRITABLE]
     gateway = Gateway(container.store, container.chat, ChatTurn(container.store, container.agents, str(REPO)),
-                      lambda: job_announce.pending(container.book, container.chat, roots))
+                      lambda: job_announce.pending(container.book, container.chat, roots), container.book)
+    progress = JobProgress(container.book, container.chat)
     threads = [threading.Thread(target=gateway.work, args=(stop,)),
-               threading.Thread(target=watch_jobs, args=(container.book, gateway, stop))]
+               threading.Thread(target=watch_jobs, args=(container.book, gateway, progress, stop))]
     for thread in threads:
         thread.start()
     poll_telegram(container, gateway, stop)
@@ -67,12 +69,13 @@ def serve(container, stop: threading.Event | None = None) -> None:
         thread.join()
 
 
-def watch_jobs(book, gateway, stop: threading.Event) -> None:
+def watch_jobs(book, gateway, progress, stop: threading.Event) -> None:
     while not stop.is_set():
         _children[:] = [p for p in _children if p.poll() is None]
         try:
             jobs.launch_queued(book, spawn_job)
             jobs.reap_dead(book)
+            progress.refresh()  # before the report, so the status line closes first
             gateway.check_jobs()
         except Exception as exc:  # one bad job folder must not stop reporting the others
             print(f"job watch error: {exc}", file=sys.stderr)

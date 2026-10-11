@@ -34,6 +34,8 @@ def test_message_reply_and_job_report(tmp_path, monkeypatch):
     class SlowAgent(FakeAgent):
         def run(self, request):
             time.sleep(0.3)
+            if "research X" in request.prompt:  # the agent's job_start tool call
+                jobs.start(book, "Research X", "brief")
             return super().run(request)
 
     codex = SlowAgent(AgentResult("Started job 1.", "s1"), AgentResult("Job 1 is done: 3 options.", "s1"),
@@ -46,7 +48,6 @@ def test_message_reply_and_job_report(tmp_path, monkeypatch):
     try:
         stub.enqueue("research X for me")
         assert _wait(lambda: any(m == "sendMessage" and p["text"] == "Started job 1." for m, p in stub.calls))
-        jobs.start(book, "Research X", "brief")
         assert _wait(lambda: any(m == "sendMessage" and "3 options" in p["text"] for m, p in stub.calls))
         stub.enqueue("one")
         assert _wait(lambda: len(codex.requests) == 3)
@@ -59,6 +60,9 @@ def test_message_reply_and_job_report(tmp_path, monkeypatch):
         stub.stop()
     first_reply = next(p for m, p in stub.calls if m == "sendMessage")
     assert first_reply["reply_parameters"]["message_id"] == 1
+    status = [p for m, p in stub.calls if m == "editMessageText"]  # the reply itself carries the job status
+    assert status[-1]["message_id"] == book.read("1")["status_msg"] and book.read("1")["status_closed"]
+    assert status[-1]["text"].startswith("Started job 1.\n\n✅ job 1 done")
     assert codex.requests[1].prompt.split("] ", 1)[1].startswith("[job 1 finished] Research X")
     assert "you: two" in codex.requests[3].prompt and "you: three" in codex.requests[3].prompt  # batched
     history = store.read_history(date.today())

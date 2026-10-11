@@ -46,3 +46,17 @@ def test_round_trip_and_ids_continue_after_removed():
     g2 = Agenda.from_dict(g.to_dict())
     assert g2.add_task("b").id == "t2"
     assert g2.open_tasks()[0].id == "t2"
+
+
+def test_task_takes_its_aims_project_and_render_filters_by_project():
+    g = Agenda()
+    g.add_aim("Launch Tusk", project="tusk")
+    g.add_aim("Ship CampaignLoop", project="campaignloop")
+    g.add_task("Record demo", aim="a1")
+    g.add_task("Pitch both", aim="a1", project="campaignloop")
+    g.add_task("Loose end")
+    assert [t.project for t in g.tasks] == ["tusk", "campaignloop", ""]
+    tusk = render(g, "tusk")
+    assert "a1 [active] Launch Tusk (tusk)" in tusk and "t1 Record demo (tusk, aim a1)" in tusk
+    assert "a2" not in tusk and "t2" not in tusk and "t3" not in tusk
+    assert "t3 Loose end" in render(g)

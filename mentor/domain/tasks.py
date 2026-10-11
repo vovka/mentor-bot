@@ -14,6 +14,7 @@ class Aim:
     why: str = ""
     target: str = ""  # ISO date or empty
     status: str = "active"
+    project: str = ""  # slug of a folder under DATA_DIR/projects, or empty
 
 
 @dataclass
@@ -25,6 +26,7 @@ class Task:
     deadline: str = ""  # ISO date or empty
     notes: str = ""
     priority: int | None = None  # 1 = top; set by reorder only
+    project: str = ""  # defaults to its aim's project
 
 
 @dataclass
@@ -46,9 +48,9 @@ class Agenda:
     def aim(self, aim_id: str) -> Aim:
         return _find(self.aims, aim_id, "aim")
 
-    def add_task(self, title: str, aim: str = "", deadline: str = "", notes: str = "") -> Task:
+    def add_task(self, title: str, aim: str = "", deadline: str = "", notes: str = "", project: str = "") -> Task:
         task = Task(_next_id(self.tasks, "t"), _title(title), notes=notes)
-        self._set_task(task, aim=aim, deadline=deadline)
+        self._set_task(task, aim=aim, deadline=deadline, project=project)
         self.tasks.append(task)
         return task
 
@@ -57,8 +59,8 @@ class Agenda:
         self._set_task(task, **changes)
         return task
 
-    def add_aim(self, title: str, why: str = "", target: str = "") -> Aim:
-        aim = Aim(_next_id(self.aims, "a"), _title(title), why, _date(target))
+    def add_aim(self, title: str, why: str = "", target: str = "", project: str = "") -> Aim:
+        aim = Aim(_next_id(self.aims, "a"), _title(title), why, _date(target), project=project)
         self.aims.append(aim)
         return aim
 
@@ -67,7 +69,7 @@ class Agenda:
         for key, value in changes.items():
             if key == "status" and value not in AIM_STATUSES:
                 raise ValueError(f"aim status must be one of {AIM_STATUSES}")
-            if key not in ("title", "why", "target", "status"):
+            if key not in ("title", "why", "target", "status", "project"):
                 raise ValueError(f"unknown aim field {key!r}")
             setattr(aim, key, _date(value) if key == "target" else _title(value) if key == "title" else value)
         return aim
@@ -82,33 +84,40 @@ class Agenda:
         for rank, task in enumerate(ranked, 1):
             task.priority = rank
 
-    def open_tasks(self) -> list[Task]:
-        """Active and paused tasks, ranked first."""
-        live = [t for t in self.tasks if t.status in ("active", "paused")]
+    def open_tasks(self, project: str = "") -> list[Task]:
+        """Active and paused tasks, ranked first; only one project's when given."""
+        live = [t for t in self.tasks if t.status in ("active", "paused") and project in ("", t.project)]
         return sorted(live, key=lambda t: (t.priority is None, t.priority or 0, _num(t.id)))
 
     def _set_task(self, task: Task, **changes) -> None:
         for key, value in changes.items():
-            if key not in ("title", "aim", "status", "deadline", "notes"):
+            if key not in ("title", "aim", "status", "deadline", "notes", "project"):
                 raise ValueError(f"unknown task field {key!r}")
             if key == "aim" and value:
                 self.aim(value)
             if key == "status" and value not in STATUSES:
                 raise ValueError(f"status must be one of {STATUSES}")
             setattr(task, key, _date(value) if key == "deadline" else _title(value) if key == "title" else value)
+        if task.aim and not task.project:
+            task.project = self.aim(task.aim).project
 
 
-def render(agenda: Agenda) -> str:
-    """Compact Markdown for prompts and chat."""
-    lines = ["Aims:"] + [f"- {a.id} [{a.status}] {a.title}" + (f" (target {a.target})" if a.target else "")
-                         + (f" — {a.why}" if a.why else "") for a in agenda.aims]
+def render(agenda: Agenda, project: str = "") -> str:
+    """Compact Markdown for prompts and chat; only one project's aims and tasks when given."""
+    aims = [a for a in agenda.aims if project in ("", a.project)]
+    lines = ["Aims:"] + [f"- {a.id} [{a.status}] {a.title}" + _parens(a.project, a.target and f"target {a.target}")
+                         + (f" — {a.why}" if a.why else "") for a in aims]
     lines.append("Open tasks (priority order):")
-    for t in agenda.open_tasks():
-        extras = [x for x in (t.status if t.status != "active" else "", t.aim and f"aim {t.aim}",
-                              t.deadline and f"due {t.deadline}") if x]
+    for t in agenda.open_tasks(project):
         rank = f"#{t.priority} " if t.priority else ""
-        lines.append(f"- {rank}{t.id} {t.title}" + (f" ({', '.join(extras)})" if extras else ""))
+        lines.append(f"- {rank}{t.id} {t.title}" + _parens(t.status if t.status != "active" else "", t.project,
+                                                             t.aim and f"aim {t.aim}", t.deadline and f"due {t.deadline}"))
     return "\n".join(lines)
+
+
+def _parens(*parts: str) -> str:
+    shown = [p for p in parts if p]
+    return f" ({', '.join(shown)})" if shown else ""
 
 
 def _find(items, item_id: str, kind: str):

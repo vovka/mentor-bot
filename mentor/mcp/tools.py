@@ -23,17 +23,22 @@ def _obj(required=(), **props) -> dict:
 
 _STR = "string"
 _TASK_FIELDS = dict(title=(_STR, "short imperative title"), aim=(_STR, "aim id like a2, or empty"),
-                    deadline=(_STR, "ISO date YYYY-MM-DD, or empty"), notes=(_STR, "free text"))
+                    deadline=(_STR, "ISO date YYYY-MM-DD, or empty"), notes=(_STR, "free text"),
+                    project=(_STR, "project slug from projects_list; empty = the aim's project"))
+_AIM_FIELDS = ("title", "why", "target", "status", "project")
 
 
 def build(role: str, store, book, renderer=None, chat=None) -> list[Tool]:
     by = role
 
     def change(op, args, fn):
+        if args.get("project") and args["project"] not in {p.name for p in store.projects()}:
+            raise ValueError(f"unknown project {args['project']!r}; see projects_list or add_project")
         return store.change_agenda(op, args, by, fn)
 
-    tasks_list = Tool("tasks_list", "Aims and open tasks in priority order, plus done/disabled counts.", _obj(),
-                      lambda a: render(store.agenda()) + _closed(store.agenda()))
+    tasks_list = Tool("tasks_list", "Aims and open tasks in priority order, plus done/disabled counts.",
+                      _obj(project=(_STR, "only this project's aims and tasks")),
+                      lambda a: render(store.agenda(), a.get("project", "")) + _closed(store.agenda()))
     projects_list = Tool("projects_list", "Known projects and their repo paths.", _obj(),
                          lambda a: "\n".join(f"- {p.name}: {p.repo_path or '(no repo)'}" for p in store.projects())
                          or "(no projects)")
@@ -53,7 +58,7 @@ def build(role: str, store, book, renderer=None, chat=None) -> list[Tool]:
         tasks_list, projects_list, reorder, recall_tool,
         Tool("task_add", "Add a task the user asked for.", _obj(["title"], **_TASK_FIELDS),
              lambda a: "added " + _task_line(change("task_add", a, lambda g: g.add_task(**_pick(a, _TASK_FIELDS))))),
-        Tool("task_update", "Change a task's title, aim, deadline or notes.", _obj(["id"], id=(_STR, "task id"),
+        Tool("task_update", "Change a task's title, aim, project, deadline or notes.", _obj(["id"], id=(_STR, "task id"),
                                                                                  **_TASK_FIELDS),
              lambda a: "updated " + _task_line(change("task_update", a, lambda g: g.update_task(
                  a["id"], **_pick(a, _TASK_FIELDS))))),
@@ -64,13 +69,15 @@ def build(role: str, store, book, renderer=None, chat=None) -> list[Tool]:
              lambda a: "now " + _task_line(change("task_set_status", a,
                                                   lambda g: g.update_task(a["id"], status=a["status"])))),
         Tool("aim_add", "Add an aim (a goal the user wants to achieve).",
-             _obj(["title"], title=(_STR, "the aim"), why=(_STR, "why it matters"), target=(_STR, "ISO date")),
-             lambda a: "added aim " + change("aim_add", a, lambda g: g.add_aim(**_pick(a, ("title", "why", "target")))).id),
-        Tool("aim_update", "Change an aim's title, why, target date or status (active, paused, done).",
+             _obj(["title"], title=(_STR, "the aim"), why=(_STR, "why it matters"), target=(_STR, "ISO date"),
+                                  project=(_STR, "project slug from projects_list, or empty")),
+             lambda a: "added aim " + change("aim_add", a, lambda g: g.add_aim(
+                 **_pick(a, ("title", "why", "target", "project")))).id),
+        Tool("aim_update", "Change an aim's title, why, target date, status (active, paused, done) or project.",
              _obj(["id"], id=(_STR, "aim id"), title=(_STR, ""), why=(_STR, ""), target=(_STR, "ISO date"),
-                  status=(_STR, "active | paused | done")),
+                  status=(_STR, "active | paused | done"), project=(_STR, "project slug")),
              lambda a: "updated aim " + change("aim_update", a, lambda g: g.update_aim(
-                 a["id"], **_pick(a, ("title", "why", "target", "status")))).id),
+                 a["id"], **_pick(a, _AIM_FIELDS))).id),
         Tool("job_start", "Hand a piece of work to a background orchestrator agent. Returns the job id at once.",
              _obj(["title", "brief"], title=(_STR, "a few words"),
                   brief=(_STR, "everything the agent needs: the user's request in their words, context, "
@@ -95,7 +102,8 @@ def _pick(args: dict, keys) -> dict:
 
 
 def _task_line(task) -> str:
-    return f"{task.id} [{task.status}] {task.title}" + (f" due {task.deadline}" if task.deadline else "")
+    return (f"{task.id} [{task.status}] {task.title}" + (f" ({task.project})" if task.project else "")
+            + (f" due {task.deadline}" if task.deadline else ""))
 
 
 def _closed(agenda) -> str:

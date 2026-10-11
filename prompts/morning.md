@@ -20,4 +20,4 @@ Reply with only one JSON object, no code fence:
              matters from the old context (who the user is, preferences, ongoing efforts, decisions, open threads),
              fold in yesterday, drop what is stale.",
  "post": "Telegram message for the user, in English unless their recent messages are Ukrainian (never Russian): good morning line, today's top 3-5 priorities
-          with one short reason each, deadlines coming up this week, and at most 3 proposals (e.g. pause X). Brief."}
+          with one short reason each and the project in brackets, deadlines coming up this week, and at most 3 proposals (e.g. pause X). Brief."}

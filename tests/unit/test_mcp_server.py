@@ -47,3 +47,17 @@ def test_chat_role_round_trip(tmp_path):
 def test_job_role_is_read_only(tmp_path):
     names = {t.name for t in tools.build("job", FileStore(tmp_path), JobBook(tmp_path))}
     assert names == {"tasks_list", "projects_list"}
+
+
+def test_project_must_be_known(tmp_path):
+    store = FileStore(tmp_path)
+    (tmp_path / "projects" / "tusk").mkdir(parents=True)
+    replies = _session(tools.build("chat", store, JobBook(tmp_path)),
+                       _call(1, "aim_add", title="Launch", project="tusk"),
+                       _call(2, "task_add", title="Demo", aim="a1"),
+                       _call(3, "task_add", title="X", project="nope"),
+                       _call(4, "tasks_list", project="tusk"))
+    text = [r["result"]["content"][0]["text"] for r in replies]
+    assert text[1] == "added t1 [active] Demo (tusk)"
+    assert replies[2]["result"]["isError"] and "unknown project 'nope'" in text[2]
+    assert "t1 Demo (tusk, aim a1)" in text[3]

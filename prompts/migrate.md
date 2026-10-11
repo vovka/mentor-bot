@@ -8,12 +8,15 @@ Read these files (read-only):
 - {DATA}/history/*.md: recent conversations, for what the user actually cares about.
 
 Then distill:
-- aims: 3-7 goals the user is pursuing (title, why, target ISO date if one is known).
+- aims: 3-7 goals the user is pursuing (title, why, target ISO date if one is known, project: the folder name
+  under {DATA}/projects it belongs to, or empty if it spans several).
 - tasks: 20-40 concrete, still-open tasks worth tracking, each tied to an aim when possible. Merge
   micro-steps into one task. Drop what is done, dropped, obsolete or pure busywork. Keep real deadlines.
-  Put details worth keeping into notes (one or two lines).
+  Put details worth keeping into notes (one or two lines). Give a task its own project only when it differs
+  from its aim's (or it has no aim).
 
 Write in English (never Russian). Reply with only one JSON object, no code fence:
-{"aims": [{"id": "a1", "title": "...", "why": "...", "target": "YYYY-MM-DD or empty"}],
- "tasks": [{"id": "t1", "title": "...", "aim": "a1 or empty", "deadline": "YYYY-MM-DD or empty", "notes": "..."}],
+{"aims": [{"id": "a1", "title": "...", "why": "...", "target": "YYYY-MM-DD or empty", "project": "slug or empty"}],
+ "tasks": [{"id": "t1", "title": "...", "aim": "a1 or empty", "project": "slug or empty",
+            "deadline": "YYYY-MM-DD or empty", "notes": "..."}],
  "dropped": "one paragraph: what you left out and why"}

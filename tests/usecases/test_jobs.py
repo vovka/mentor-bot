@@ -8,6 +8,8 @@ from mentor.adapters.store.jobs import JobBook
 from mentor.adapters.telegram.fake import FakeChat
 from mentor.domain.agent import AgentResult
 from mentor.usecases import job_announce, job_run, jobs
+from mentor.usecases import job_progress
+from mentor.usecases.job_progress import JobProgress
 
 
 def _setup(tmp_path, *codex_results, claude=None):
@@ -65,3 +67,32 @@ def test_launch_queued_spawns_once(tmp_path):
     jobs.launch_queued(book, lambda job_id: spawned.append(job_id) or 4242)
     jobs.launch_queued(book, lambda job_id: spawned.append(job_id) or 4242)
     assert spawned == ["1"] and book.read("1")["pid"] == 4242
+
+
+def test_reply_carries_live_status_until_the_job_closes(tmp_path):
+    store, book, agents = _setup(tmp_path)
+    jobs.start(book, "Other", "brief")
+    chat = FakeChat()
+    job_progress.attach(book, chat, [book.read("1"), book.read("2")], "Started jobs 1 and 2.", 41)
+    progress = JobProgress(book, chat)
+    book.update("1", status="running")
+    (book.dir("1") / "steps.log").write_text("ran `ls`\nsearched: x\nedited README.md\nran `pytest`\n")
+    progress.refresh()
+    message, text = chat.edits[-1]
+    assert message == 41 and text.startswith("Started jobs 1 and 2.\n\n⏳ job 1 running")
+    assert "· `searched: x`\n· `edited README.md`\n· `ran pytest`\n\n⏳ job 2 queued" in text
+    progress.refresh()
+    assert len(chat.edits) == 1  # unchanged and within the interval: no edit
+    book.update("1", status="done")
+    book.update("2", status="cancelled")
+    progress.refresh()
+    assert "✅ job 1 done" in chat.edits[-1][1] and "🛑 job 2 cancelled" in chat.edits[-1][1]
+    progress.refresh()
+    assert len(chat.edits) == 2 and chat.outbox == [] and book.read("2")["status_closed"]
+
+
+def test_too_long_reply_gets_a_separate_status_message(tmp_path):
+    store, book, agents = _setup(tmp_path)
+    chat = FakeChat()
+    job_progress.attach(book, chat, [book.read("1")], "x" * 5000, 41)
+    assert chat.outbox == ["job 1"] and book.read("1")["status_msg"] == 1 and book.read("1")["status_base"] == ""

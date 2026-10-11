@@ -40,8 +40,9 @@ def _validated(answer: dict) -> Agenda:
     """Rebuild through the domain operations so ids, aims and dates are checked."""
     agenda, ids = Agenda(), {}
     for aim in answer["aims"]:
-        ids[aim["id"]] = agenda.add_aim(aim["title"], aim.get("why", ""), aim.get("target", "")).id
+        ids[aim["id"]] = agenda.add_aim(aim["title"], aim.get("why", ""), aim.get("target", ""),
+                                        aim.get("project", "")).id
     for task in answer["tasks"]:
         agenda.add_task(task["title"], ids.get(task.get("aim", ""), ""), task.get("deadline", ""),
-                        task.get("notes", ""))
+                        task.get("notes", ""), task.get("project", ""))
     return agenda

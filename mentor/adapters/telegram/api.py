@@ -72,7 +72,14 @@ class TelegramChat:
             return json.loads(resp.read())["result"]["message_id"]
 
     def edit(self, id: int, text: str) -> None:
-        self._edit({"chat_id": self._chat_id, "message_id": id, "text": text})
+        """Markdown like `send`; falls back to the plain text when Telegram rejects the HTML."""
+        params = {"chat_id": self._chat_id, "message_id": id, "text": to_html(text), "parse_mode": "HTML"}
+        try:
+            self._edit(params)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 400:
+                raise
+            self._edit({**params, "text": text, "parse_mode": None})
 
     def send_html(self, text: str, reply_to: int | None = None) -> int:
         params = {"chat_id": self._chat_id, "text": text, "parse_mode": "HTML", **_reply(reply_to)}

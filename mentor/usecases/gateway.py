@@ -9,13 +9,15 @@ import threading
 import time
 from datetime import datetime
 
+from mentor.usecases import job_progress
+
 _TYPING_EVERY = 4  # seconds; Telegram drops the indicator after ~5
 _SETTLE = 0.7  # seconds to wait for the rest of a burst of messages before answering
 
 
 class Gateway:
-    def __init__(self, store, chat, turn, announce):
-        self.store, self.chat, self.turn, self.announce = store, chat, turn, announce
+    def __init__(self, store, chat, turn, announce, book):
+        self.store, self.chat, self.turn, self.announce, self.book = store, chat, turn, announce, book
         self.inbox: queue.Queue = queue.Queue()
 
     def on_update(self, update) -> None:
@@ -46,10 +48,14 @@ class Gateway:
                 print(f"chat turn error: {exc}", file=sys.stderr)
 
     def answer(self, batch: list[tuple[str, int | None]]) -> None:
-        reply = self._with_typing(lambda: self.turn.run([line for line, _ in batch]))
+        known = {job["id"] for job in self.book.all()}
+        reply = self._with_typing(lambda: self.turn.run([line for line, _ in batch])) or "(no reply)"
         message_ids = [m for _, m in batch if m]
         self.store.append_history(_stamp(f"mentor: {reply}"))
-        _retry(lambda: self.chat.send(reply or "(no reply)", reply_to=message_ids[-1] if message_ids else None))
+        sent = _retry(lambda: self.chat.send(reply, reply_to=message_ids[-1] if message_ids else None))
+        started = [job for job in self.book.all() if job["id"] not in known]
+        if started:  # the reply ("job 7 started") becomes the job's live status message
+            job_progress.attach(self.book, self.chat, started, reply, sent)
         for message_id in message_ids:
             _retry(lambda: self.chat.react(message_id, None))
 
