@@ -1,145 +1,116 @@
-"""FileStore: Markdown/JSON persistence under DATA_DIR."""
+"""FileStore: JSON/Markdown persistence under DATA_DIR. Cross-process safe through the data lock."""
 
 import json
 import os
 import shutil
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from mentor.adapters.store.lock import locked
 from mentor.domain.project import Project
-from mentor.domain.settings import BrainSettings
-from mentor.domain import tasks as task_graph
-from mentor.domain.tasks import Task
-
-DEFAULT_SETTINGS = {
-    "provider": "codex",
-    "model": "gpt-5.5",
-    "effort": "low",
-    "plan": {"provider": "codex", "model": "gpt-5.6-sol", "effort": "medium"},
-    "heavy": {"provider": "codex", "model": "gpt-5.6-sol", "effort": "high"},
-}
+from mentor.domain.tasks import Agenda
 
 
 class FileStore:
     def __init__(self, data_dir: Path):
         self.data_dir = Path(data_dir)
-        (self.data_dir / "history").mkdir(parents=True, exist_ok=True)
-        (self.data_dir / "projects").mkdir(parents=True, exist_ok=True)
+        for sub in ("history", "projects", "days", "jobs"):
+            (self.data_dir / sub).mkdir(parents=True, exist_ok=True)
 
-    def _plan_path(self, project: str | None) -> Path:
-        if project:
-            return self.data_dir / "projects" / project / "plan.md"
-        return self.data_dir / "plan.md"
-
-    def read_plan(self, project: str | None = None) -> str:
-        path = self._plan_path(project)
-        return path.read_text() if path.exists() else ""
-
-    def write_plan(self, text: str, project: str | None = None) -> None:
-        self._plan_path(project).write_text(text)
-
-    def write_plan_project(self, name: str, text: str) -> None:
-        self.write_plan(text, project=name)
-
-    def read_timeline(self, project: str | None = None) -> str:
-        base = self.data_dir / "projects" / project if project else self.data_dir
-        path = base / "timeline.md"
-        return path.read_text() if path.exists() else ""
-
+    # settings and state
     def read_settings(self) -> dict:
-        path = self.data_dir / "settings.json"
-        if not path.exists():
-            path.write_text(json.dumps(DEFAULT_SETTINGS, indent=2))
-        return json.loads(path.read_text())
-
-    def write_settings(self, settings: BrainSettings) -> None:
-        current = self.read_settings()
-        current.update(provider=settings.provider, model=settings.model, effort=settings.effort)
-        self._atomic_write(self.data_dir / "settings.json", json.dumps(current, indent=2))
-
-    def write_tier(self, name: str, settings: BrainSettings) -> None:
-        if name == "chat":
-            return self.write_settings(settings)
-        current = self.read_settings()
-        current[name] = {
-            "provider": settings.provider,
-            "model": settings.model,
-            "effort": settings.effort,
-        }
-        self._atomic_write(self.data_dir / "settings.json", json.dumps(current, indent=2))
+        return self._read_json("settings.json", {})
 
     def read_state(self) -> dict:
-        path = self.data_dir / "state.json"
+        return self._read_json("state.json", {})
+
+    def update_state(self, **changes) -> dict:
+        with locked(self.data_dir):
+            state = {**self.read_state(), **changes}
+            self._write_json("state.json", state)
+        return state
+
+    # agenda
+    def agenda(self) -> Agenda:
+        return Agenda.from_dict(self._read_json("tasks.json", {}))
+
+    def change_agenda(self, op: str, args: dict, by: str, apply):
+        """Run `apply(agenda)` under the lock, save, log the event; returns what apply returned."""
+        with locked(self.data_dir):
+            agenda = self.agenda()
+            result = apply(agenda)
+            self._write_json("tasks.json", agenda.to_dict())
+            event = {"at": datetime.now().isoformat(timespec="seconds"), "op": op, "args": args, "by": by}
+            with open(self.data_dir / "events.jsonl", "a") as f:
+                f.write(json.dumps(event, ensure_ascii=False) + "\n")
+        return result
+
+    def events_since(self, since: str) -> list[dict]:
+        path = self.data_dir / "events.jsonl"
         if not path.exists():
-            path.write_text("{}")
-        return json.loads(path.read_text())
+            return []
+        events = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        return [e for e in events if e["at"] >= since]
 
-    def write_state(self, state: dict) -> None:
-        self._atomic_write(self.data_dir / "state.json", json.dumps(state, indent=2))
+    # conversation memory
+    def append_history(self, text: str, day: date | None = None) -> None:
+        with locked(self.data_dir), open(self.history_path(day or date.today()), "a") as f:
+            f.write(text + "\n")
 
-    def read_tasks(self) -> list[Task]:
-        path = self.data_dir / "tasks.json"
-        return task_graph.parse(path.read_text()) if path.exists() else []
+    def history_path(self, day: date) -> Path:
+        return self.data_dir / "history" / f"{day.isoformat()}.md"
 
-    def write_tasks(self, tasks: list[Task]) -> None:
-        self._atomic_write(self.data_dir / "tasks.json", task_graph.dump(tasks))
+    def read_history(self, day: date) -> str:
+        return _read(self.history_path(day))
+
+    def list_history_days(self) -> list[date]:
+        return sorted(date.fromisoformat(p.stem) for p in (self.data_dir / "history").glob("????-??-??.md"))
+
+    def read_context(self) -> str:
+        return _read(self.data_dir / "context.md")
+
+    def write_context(self, text: str) -> None:
+        self._atomic_write(self.data_dir / "context.md", text)
+
+    def read_day(self, day: date) -> str:
+        return _read(self.data_dir / "days" / f"{day.isoformat()}.md")
+
+    def write_day(self, day: date, text: str) -> None:
+        self._atomic_write(self.data_dir / "days" / f"{day.isoformat()}.md", text)
+
+    # projects
+    def projects(self) -> list[Project]:
+        base = self.data_dir / "projects"
+        return [Project(name=p.name, path=str(p), repo_path=_read_repo_path(p))
+                for p in sorted(base.iterdir()) if p.is_dir() and p.name != "_template"]
+
+    def add_project(self, name: str, repo_path: str) -> None:
+        dest = self.data_dir / "projects" / name
+        shutil.copytree(self.data_dir / "projects" / "_template", dest)
+        project_md = dest / "project.md"
+        project_md.write_text(project_md.read_text().replace("<name>", name).replace("<path>", repo_path))
+
+    # helpers
+    def _read_json(self, name: str, default):
+        path = self.data_dir / name
+        return json.loads(path.read_text()) if path.exists() else default
+
+    def _write_json(self, name: str, data) -> None:
+        self._atomic_write(self.data_dir / name, json.dumps(data, indent=2, ensure_ascii=False))
 
     def _atomic_write(self, path: Path, text: str) -> None:
         tmp = path.with_name(path.name + ".tmp")
         tmp.write_text(text)
         os.replace(tmp, path)
 
-    def _history_path(self, day: date) -> Path:
-        return self.data_dir / "history" / f"{day.isoformat()}.md"
 
-    def append_history(self, text: str) -> None:
-        """Under the data lock: chat threads and the executor append concurrently. Caller must not hold it."""
-        with locked(self.data_dir), open(self._history_path(date.today()), "a") as f:
-            f.write(text + "\n")
-
-    def read_history(self, day: date) -> str:
-        path = self._history_path(day)
-        return path.read_text() if path.exists() else ""
-
-    def list_history_days(self) -> list[date]:
-        days = []
-        for path in (self.data_dir / "history").glob("*.md"):
-            try:
-                days.append(date.fromisoformat(path.stem))
-            except ValueError:
-                continue
-        return sorted(days)
-
-    def read_recent_history(self, days: int = 2) -> str:
-        recent = self.list_history_days()[-days:]
-        return "\n".join(self.read_history(d) for d in recent)
-
-    def read_summary(self) -> str:
-        path = self.data_dir / "history" / "summary.md"
-        return path.read_text() if path.exists() else ""
-
-    def write_summary(self, text: str) -> None:
-        (self.data_dir / "history" / "summary.md").write_text(text)
-
-    def projects(self) -> list[Project]:
-        base = self.data_dir / "projects"
-        return [
-            Project(name=p.name, path=str(p), repo_path=_read_repo_path(p))
-            for p in sorted(base.iterdir())
-            if p.is_dir() and p.name != "_template"
-        ]
-
-    def add_project(self, name: str, repo_path: str) -> None:
-        dest = self.data_dir / "projects" / name
-        shutil.copytree(self.data_dir / "projects" / "_template", dest)
-        project_md = dest / "project.md"
-        text = project_md.read_text().replace("<name>", name).replace("<path>", repo_path)
-        project_md.write_text(text)
+def _read(path: Path) -> str:
+    return path.read_text() if path.exists() else ""
 
 
 def _read_repo_path(project_dir: Path) -> str:
-    for line in (project_dir / "project.md").read_text().splitlines():
+    project_md = project_dir / "project.md"
+    for line in _read(project_md).splitlines():
         if line.startswith("repo:"):
             return line.removeprefix("repo:").strip()
     return ""

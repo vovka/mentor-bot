@@ -1,106 +1,48 @@
-import json
-
 import pytest
 
-from mentor.domain.tasks import Task, dump, merge, next_ready, parse, render
+from mentor.domain.tasks import Agenda, render
 
 
-def _text(*tasks):
-    return json.dumps({"tasks": list(tasks)})
+def test_add_update_status_and_render():
+    g = Agenda()
+    aim = g.add_aim("Get a job", why="money", target="2026-12-01")
+    t = g.add_task("Send CV to Acme", aim=aim.id, deadline="2026-10-16")
+    assert (aim.id, t.id) == ("a1", "t1")
+    g.update_task("t1", status="paused", notes="wait for referral")
+    assert g.task("t1").status == "paused"
+    assert "t1 Send CV to Acme (paused, aim a1, due 2026-10-16)" in render(g)
 
 
-def test_parse_defaults_and_unknown_keys():
-    [t] = parse(_text({"id": "a", "title": "A", "extra": 1}))
-    assert t == Task("a", "A")
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "not json",
-        "{}",
-        _text({"title": "A"}),
-        _text({"id": "a", "title": ""}),
-        _text({"id": "a", "title": "A"}, {"id": "a", "title": "B"}),
-        _text({"id": "a", "title": "A", "kind": "magic"}),
-        _text({"id": "a", "title": "A", "status": "bogus"}),
-        _text({"id": "a", "title": "A", "deps": ["zz"]}),
-        _text({"id": "a", "title": "A", "deps": ["b"]}, {"id": "b", "title": "B", "deps": ["a"]}),
-    ],
-)
-def test_parse_rejects_invalid(text):
+@pytest.mark.parametrize("call", [
+    lambda g: g.add_task(""),
+    lambda g: g.add_task("x", aim="a9"),
+    lambda g: g.add_task("x", deadline="Friday"),
+    lambda g: g.update_task("t1", status="running"),
+    lambda g: g.update_task("t1", priority=1),
+    lambda g: g.update_task("t404", title="x"),
+    lambda g: g.reorder(["t1", "t1"]),
+])
+def test_invalid_operations_raise(call):
+    g = Agenda()
+    g.add_task("one")
     with pytest.raises(ValueError):
-        parse(text)
+        call(g)
 
 
-def test_dump_round_trips():
-    tasks = [Task("a", "Zażółć"), Task("b", "B", deps=["a"], files=["x"], approved=True)]
-    assert parse(dump(tasks)) == tasks
+def test_reorder_ranks_listed_and_clears_others():
+    g = Agenda()
+    for title in ("a", "b", "c"):
+        g.add_task(title)
+    g.reorder(["t3", "t1"])
+    assert [(t.id, t.priority) for t in g.open_tasks()] == [("t3", 1), ("t1", 2), ("t2", None)]
+    g.reorder(["t2"])
+    assert g.task("t3").priority is None
 
 
-def test_next_ready_respects_deps():
-    a, b = Task("a", "A"), Task("b", "B", deps=["a"])
-    assert next_ready([b, a]) is a
-    a.status = "done"
-    assert next_ready([b, a]) is b
-    a.status = "dropped"
-    assert next_ready([b, a]) is b
-    a.status = "running"
-    assert next_ready([b, a]) is None
-
-
-def test_merge_keeps_runtime_and_status():
-    old = [Task("a", "Old", status="running", files=["f"], approved=True, provider="p", proposal="x")]
-    [m] = merge(old, [Task("a", "New", due="d")])
-    assert (m.title, m.due, m.status, m.files, m.approved, m.provider, m.proposal) == (
-        "New", "d", "running", ["f"], True, "p", "x")
-
-
-def test_merge_done_or_dropped_wins():
-    old = [Task("a", "A", status="running"), Task("b", "B", status="todo")]
-    new = [Task("a", "A", status="done"), Task("b", "B", status="dropped")]
-    assert [t.status for t in merge(old, new)] == ["done", "dropped"]
-
-
-def test_merge_keeps_absent_running_first_and_drops_rest():
-    old = [Task("r", "R", status="running"), Task("t", "T"), Task("a", "A")]
-    assert [t.id for t in merge(old, [Task("n", "N"), Task("a", "A")])] == ["r", "n", "a"]
-
-
-def test_render_empty():
-    assert render([]) == "No tasks yet."
-
-
-def test_render_sections():
-    tasks = [
-        Task("a", "Alpha", project="p", due="Fri"),
-        Task("r", "Run", status="running"),
-        Task("w", "Wait", status="awaiting_user", note="reply"),
-        Task("f", "Fail", status="failed"),
-        Task("d", "Done", status="done"),
-        Task("x", "Gone", status="dropped"),
-        Task("b", "Beta"),
-    ]
-    assert render(tasks) == (
-        "**Next:** Alpha (p) · due Fri\n\n**In progress:**\n- Run\n\n"
-        "**Waiting on you:**\n- Wait — reply\n\n**Failed:**\n- Fail\n\n"
-        "**Then:**\n- Beta\n\nDone: 1 of 6"
-    )
-
-
-def test_merge_gives_new_tasks_clean_runtime_fields_and_status():
-    new = [Task("x", "X", approved=True, proposal="rm -rf", files=["f"], provider="claude", status="running")]
-    (task,) = merge([], new)
-    assert (task.approved, task.proposal, task.files, task.provider, task.status) == (False, "", [], "", "todo")
-
-
-def test_merge_result_with_a_kept_running_task_still_parses():
-    old = [Task("a", "A", status="done"), Task("b", "B", deps=["a"], status="running")]
-    merged = merge(old, [Task("c", "C")])
-    assert [t.id for t in parse(dump(merged))] == ["b", "c"] and merged[0].deps == []
-
-
-def test_parse_rejects_ids_that_cannot_travel_in_callback_data():
-    for bad in ("a:b", "x" * 49, "has space"):
-        with pytest.raises(ValueError, match="task id"):
-            parse(json.dumps({"tasks": [{"id": bad, "title": "T"}]}))
+def test_round_trip_and_ids_continue_after_removed():
+    g = Agenda()
+    g.add_task("a")
+    g.update_task("t1", status="removed")
+    g2 = Agenda.from_dict(g.to_dict())
+    assert g2.add_task("b").id == "t2"
+    assert g2.open_tasks()[0].id == "t2"

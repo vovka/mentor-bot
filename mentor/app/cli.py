@@ -1,115 +1,102 @@
-"""mentor CLI: serve | job {morning,deadline,replan,compact,work} | doctor."""
+"""mentor CLI: serve | mcp --role R | job-run ID | morning [--now] | migrate {propose,apply} | doctor."""
 
 import argparse
+import os
 import signal
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
+from mentor.adapters.agent.mentor_mcp import REPO
+from mentor.adapters.agent.secrets import deny_paths
 from mentor.app.config import Config
 from mentor.app.container import build
-from mentor.app.kick import kick
-from mentor.usecases import handle_update
+from mentor.usecases import job_announce, job_run, jobs
+from mentor.usecases.chat_turn import ChatTurn
+from mentor.usecases.gateway import Gateway
+
+_JOB_POLL = 2  # seconds between job checks
+_children: list[subprocess.Popen] = []  # job runners, polled so they do not linger as zombies
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="mentor")
     sub = parser.add_subparsers(dest="command", required=True)
-    serve = sub.add_parser("serve")
-    serve.add_argument("--with-scheduler", action="store_true")
-    job = sub.add_parser("job")
-    job.add_argument("name", choices=["morning", "deadline", "replan", "compact", "work"])
-    job.add_argument("--dry-run", action="store_true")
+    sub.add_parser("serve")
+    sub.add_parser("mcp").add_argument("--role", choices=["chat", "job", "morning"], required=True)
+    sub.add_parser("job-run").add_argument("job_id")
+    sub.add_parser("morning").add_argument("--now", action="store_true", help="post at once, not at 08:00")
+    sub.add_parser("migrate").add_argument("step", choices=["propose", "apply"])
     sub.add_parser("doctor")
-    return parser
-
-
-def _start_scheduler(container) -> None:
-    from mentor.adapters.scheduler.inprocess import Scheduler, load_schedule
-    from mentor.app import jobs
-
-    schedule = load_schedule(container.store.data_dir)
-    scheduler = Scheduler(container.clock, schedule, jobs.run)
-    threading.Thread(target=scheduler.run_forever, daemon=True).start()
-
-
-def _serve(with_scheduler: bool = False) -> None:
+    args = parser.parse_args(argv)
     container = build(Config.from_env())
-    if with_scheduler:
-        _start_scheduler(container)
-    stop = threading.Event()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(sig, lambda *_: stop.set())
-    kick()  # drain jobs and tasks left over from before a restart
-    serve_loop(container, stop)
+    if args.command == "serve":
+        serve(container)
+    elif args.command == "mcp":
+        from mentor.mcp import server, tools
+        server.serve(tools.build(args.role, container.store, container.book, container.renderer, container.chat))
+    elif args.command == "job-run":
+        job_run.run(args.job_id, container.store, container.book, container.agents, deny_paths())
+    elif args.command == "morning":
+        from mentor.usecases import morning
+        morning.run(container.store, container.chat, container.agents, str(REPO), wait=not args.now)
+    elif args.command == "migrate":
+        from mentor.usecases import migrate
+        print(migrate.run(args.step, container.store, container.chat, container.agents, str(REPO)))
+    else:
+        container.chat.send("doctor: ok")
 
 
-def serve_loop(container, stop: threading.Event, kick=kick) -> None:
-    """Long-poll until `stop`; each update runs in its own thread so a slow answer never blocks the chat."""
-    offset = container.store.read_state().get("last_update_id", 0) + 1
-    threads: list[threading.Thread] = []
-    while not stop.is_set():
-        try:
-            for update in container.chat.poll(offset):
-                offset = update.update_id + 1
-                threads = [t for t in threads if t.is_alive()] + dispatch(container, update, kick)
-        except Exception as exc:  # long-poll loop must survive transient errors
-            print(f"serve error: {exc}", file=sys.stderr)
-            stop.wait(1)
+def serve(container, stop: threading.Event | None = None) -> None:
+    stop = stop or threading.Event()
+    if threading.current_thread() is threading.main_thread():
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            signal.signal(sig, lambda *_: stop.set())
+    roots = [Path(p).expanduser().resolve() for p in job_run.WRITABLE]
+    gateway = Gateway(container.store, container.chat, ChatTurn(container.store, container.agents, str(REPO)),
+                      lambda: job_announce.pending(container.book, container.chat, roots))
+    threads = [threading.Thread(target=gateway.work, args=(stop,)),
+               threading.Thread(target=watch_jobs, args=(container.book, gateway, stop))]
+    for thread in threads:
+        thread.start()
+    poll_telegram(container, gateway, stop)
     for thread in threads:
         thread.join()
 
 
-def dispatch(container, update, kick=kick) -> list[threading.Thread]:
-    """Dedup in poll order, then handle the update in a new non-daemon thread (shutdown waits for it)."""
-    # ponytail: one unbounded thread per update; fine for one user, add a pool if updates ever flood in
-    if not handle_update.claim(container.store, update):
-        return []
-    thread = threading.Thread(target=_handle, args=(container, update, kick))
-    thread.start()
-    return [thread]
+def watch_jobs(book, gateway, stop: threading.Event) -> None:
+    while not stop.is_set():
+        _children[:] = [p for p in _children if p.poll() is None]
+        try:
+            jobs.launch_queued(book, spawn_job)
+            jobs.reap_dead(book)
+            gateway.check_jobs()
+        except Exception as exc:  # one bad job folder must not stop reporting the others
+            print(f"job watch error: {exc}", file=sys.stderr)
+        stop.wait(_JOB_POLL)
 
 
-def _handle(container, update, kick) -> None:
-    try:
-        handle_update.route(
-            container.store, container.brain, container.chat, container.clock, update,
-            renderer=container.renderer, kick=kick,
-        )
-    except Exception as exc:  # one failed update must not take the others down
-        print(f"serve error: update {update.update_id}: {exc}", file=sys.stderr)
+def poll_telegram(container, gateway, stop: threading.Event) -> None:
+    offset = container.store.read_state().get("last_update_id", 0) + 1
+    while not stop.is_set():
+        try:
+            for update in container.chat.poll(offset):
+                offset = update.update_id + 1
+                container.store.update_state(last_update_id=update.update_id)
+                gateway.on_update(update)
+        except Exception as exc:  # the long-poll loop must survive transient errors
+            print(f"poll error: {exc}", file=sys.stderr)
+            stop.wait(1)
 
 
-def _doctor() -> None:
-    container = build(Config.from_env())
-    container.chat.send("doctor: ok")
-    result = subprocess.run(
-        [
-            "codex", "exec", "-s", "read-only", "--ignore-user-config",
-            "-m", "gpt-5.5", "-c", "model_reasoning_effort=low",
-            "--skip-git-repo-check", "--", "reply with exactly: ok",
-        ],
-        stdin=subprocess.DEVNULL,  # codex exec blocks on an open stdin
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-    print("telegram: sent 'doctor: ok'")
-    print(f"codex exec: {result.stdout.strip() or result.stderr.strip()}")
-
-
-def main() -> None:
-    args = _build_parser().parse_args()
-    if args.command == "doctor":
-        _doctor()
-    elif args.command == "serve":
-        _serve(with_scheduler=args.with_scheduler)
-    elif args.command == "job":
-        from mentor.app import jobs
-
-        print(jobs.run(args.name, dry_run=args.dry_run))
-    else:
-        print("not implemented")
+def spawn_job(job_id: str) -> int:
+    """Detached runner in its own session: survives a service restart and dies as a group on cancel."""
+    with open(Path(os.environ["DATA_DIR"]) / "jobs" / job_id / "run.log", "a") as log:
+        proc = subprocess.Popen([sys.executable, "-m", "mentor.app.cli", "job-run", job_id], cwd=REPO,
+                                stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+    _children.append(proc)
+    return proc.pid
 
 
 if __name__ == "__main__":
