@@ -15,7 +15,9 @@ def pending(book, chat, file_roots: list[Path]) -> list[str]:
             continue
         result = book.result(job["id"])
         roots = [book.dir(job["id"]).resolve(), *file_roots]
-        sent = [name for name in result.get("artifacts", []) if send_file(chat, name, book.dir(job["id"]), roots)]
+        reply_to = job.get("status_msg")
+        sent = [name for name in result.get("artifacts", [])
+                if send_file(chat, name, book.dir(job["id"]), roots, reply_to)]
         body = summary(result) or "(no report written)"
         head = f"[job {job['id']} {_verb(job['status'])}] {job['title']}"
         lines.append(f"{head}\n{body}" + (f"\n(sent to chat: {', '.join(sent)})" if sent else ""))
@@ -23,14 +25,14 @@ def pending(book, chat, file_roots: list[Path]) -> list[str]:
     return lines
 
 
-def send_file(chat, name: str, job_dir: Path, roots: list[Path]) -> bool:
+def send_file(chat, name: str, job_dir: Path, roots: list[Path], reply_to: int | None = None) -> bool:
     path = (job_dir / Path(name).expanduser()).resolve()
     root = next((r for r in roots if path.is_relative_to(r)), None)
     if root is None or not path.is_file() or any(p.startswith(".") for p in path.relative_to(root).parts):
         return False  # outside the allowed roots, missing, or a dotfile such as .env or .git/*
     if path.stat().st_size > _MAX_UPLOAD:
         return False
-    chat.send_document(path.read_bytes(), path.name)
+    chat.send_document(path.read_bytes(), path.name, reply_to=reply_to)
     return True
 
 

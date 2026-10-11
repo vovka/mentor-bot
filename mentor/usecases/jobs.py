@@ -31,7 +31,8 @@ def summary(result: dict) -> str:
     parts = [result.get("summary", "")]
     for key, label in (("assumptions", "Assumptions"), ("your_move", "Your move"), ("artifacts", "Files")):
         if result.get(key):
-            parts.append(f"{label}:\n" + "\n".join(f"- {x}" for x in result[key]))
+            items = [f"`{x}`" if key == "artifacts" else x for x in result[key]]  # file names: no auto-links
+            parts.append(f"{label}:\n" + "\n".join(f"- {x}" for x in items))
     return "\n\n".join(p for p in parts if p)
 
 

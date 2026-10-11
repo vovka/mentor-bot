@@ -37,4 +37,6 @@ Finish by writing `{JOB_DIR}/result.json` (valid JSON, in English unless the bri
  "artifacts": ["paths of files the user should get in chat, e.g. out/report.md"],
  "your_move": ["what the user has to do next, e.g. review and merge branch job/7 in ~/dev/x"]}
 Use "failed" only when you could not produce a useful result; explain why in the summary.
+The text is shown in Telegram as Markdown: wrap every path, file name, command and identifier in backticks
+(`out/report.md`, `__init__.py`), or Telegram turns them into links and underscores into italics.
 Then reply with the same summary.

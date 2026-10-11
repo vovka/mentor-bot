@@ -10,7 +10,7 @@ flowchart TB
   TG[Telegram] <--> SERVE
   subgraph SERVE["mentor serve (systemd: mentor.service)"]
     POLL[poll thread] --> INBOX[(queue)]
-    WATCH["job watcher (2 s)<br/>launch queued · reap dead · announce finished"] --> INBOX
+    WATCH["job watcher (2 s)<br/>launch queued · reap dead · edit job status · queue reports"] --> INBOX
     INBOX --> WORKER["chat worker: one turn at a time,<br/>batches what arrived meanwhile"]
   end
   WORKER -- "codex exec [resume id] --ignore-user-config -s read-only" --> CHAT[chat agent]
@@ -61,9 +61,10 @@ flowchart TB
   `Edit(...)` allow rules, network `allowedDomains: ["*"]`. Test outside a model: `codex sandbox -c ... -P mentor -- cmd`.
 - **Jobs outlive the service** (`start_new_session`, `KillMode=process`). Cancel = status `cancelled` + SIGTERM to the
   runner's process group; a runner that vanished is reaped as failed. Reports are announced once (`announced`).
-- **Live job status** (the etymology_bot pattern: one message edited in place). The chat reply that started a job
-  ("job 7 started") gets a status block appended: elapsed time and the last 3 steps, edited at most every 10 s, then
-  "✅ job 7 done". Jobs started in one turn share the reply. The report still comes as a new message, so it notifies.
+- **One message per job** (the etymology_bot pattern: a message edited in place). The chat reply that started a job
+  ("job 7 started", a reply to the user's message) gets the job's elapsed time and last 3 steps, edited at most every
+  10 s. When it ends, the steps fold into an expandable blockquote and the report follows in the same message; files
+  come as replies to it. The report reaches the chat agent with the user's next message, without a turn of its own.
 - **MCP children get few env vars**: `DATA_DIR` and `TZ` are passed explicitly; `.env` is read from the repo cwd.
 - **Telegram calls fail now and then** (TLS handshake timeouts): replies and reaction clears are retried 3 times; the
   chat worker never dies on one failed turn.

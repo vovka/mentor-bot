@@ -69,7 +69,7 @@ def test_launch_queued_spawns_once(tmp_path):
     assert spawned == ["1"] and book.read("1")["pid"] == 4242
 
 
-def test_reply_carries_live_status_until_the_job_closes(tmp_path):
+def test_reply_carries_live_status_then_folded_steps_and_the_report(tmp_path):
     store, book, agents = _setup(tmp_path)
     jobs.start(book, "Other", "brief")
     chat = FakeChat()
@@ -78,17 +78,32 @@ def test_reply_carries_live_status_until_the_job_closes(tmp_path):
     book.update("1", status="running")
     (book.dir("1") / "steps.log").write_text("ran `ls`\nsearched: x\nedited README.md\nran `pytest`\n")
     progress.refresh()
-    message, text = chat.edits[-1]
+    message, text = chat.html_edits[-1]
     assert message == 41 and text.startswith("Started jobs 1 and 2.\n\n⏳ job 1 running")
-    assert "· `searched: x`\n· `edited README.md`\n· `ran pytest`\n\n⏳ job 2 queued" in text
+    assert "· <code>searched: x</code>\n· <code>edited README.md</code>\n· <code>ran `pytest`</code>" in text
+    assert text.endswith("⏳ job 2 queued · 0m 00s")
     progress.refresh()
-    assert len(chat.edits) == 1  # unchanged and within the interval: no edit
+    assert len(chat.html_edits) == 1  # unchanged and within the interval: no edit
+    (book.dir("1") / "result.json").write_text(json.dumps({"summary": "Found **3** options."}))
     book.update("1", status="done")
     book.update("2", status="cancelled")
     progress.refresh()
-    assert "✅ job 1 done" in chat.edits[-1][1] and "🛑 job 2 cancelled" in chat.edits[-1][1]
+    text = chat.html_edits[-1][1]
+    assert "✅ job 1 done · 0m 00s · 4 steps\n<blockquote expandable>ran `ls`\nsearched: x" in text
+    assert "ran `pytest`</blockquote>\nFound <b>3</b> options.\n\n🛑 job 2 cancelled" in text
     progress.refresh()
-    assert len(chat.edits) == 2 and chat.outbox == [] and book.read("2")["status_closed"]
+    assert len(chat.html_edits) == 2 and chat.outbox == [] and book.read("2")["status_closed"]
+
+
+def test_long_report_goes_to_a_separate_reply(tmp_path):
+    store, book, agents = _setup(tmp_path)
+    chat = FakeChat()
+    job_progress.attach(book, chat, [book.read("1")], "Started job 1.", 41)
+    (book.dir("1") / "result.json").write_text(json.dumps({"summary": "x" * 5000}))
+    book.update("1", status="done")
+    JobProgress(book, chat).refresh()
+    assert chat.html_edits[-1][1].endswith("(report below)") and chat.outbox == ["x" * 5000]
+    assert chat.replies[1] == 41
 
 
 def test_too_long_reply_gets_a_separate_status_message(tmp_path):

@@ -1,6 +1,7 @@
-"""Gateway: Telegram messages and job reports feed one queue; one worker runs chat turns in order.
+"""Gateway: Telegram messages feed one queue; one worker runs chat turns in order.
 
 Whatever arrives while a turn runs is batched into the next turn, so the agent session never runs twice at once.
+Job reports are already shown in the job's own message: they reach the agent with the next turn, without one of their own.
 """
 
 import queue
@@ -19,6 +20,7 @@ class Gateway:
     def __init__(self, store, chat, turn, announce, book):
         self.store, self.chat, self.turn, self.announce, self.book = store, chat, turn, announce, book
         self.inbox: queue.Queue = queue.Queue()
+        self.reports: queue.Queue = queue.Queue()
 
     def on_update(self, update) -> None:
         if not update.text:
@@ -31,7 +33,9 @@ class Gateway:
 
     def check_jobs(self) -> None:
         for line in self.announce():
-            self._receive(line, None)
+            line = _stamp(line)
+            self.store.append_history(line)
+            self.reports.put(line)
 
     def work(self, stop: threading.Event) -> None:
         while not stop.is_set():
@@ -49,7 +53,10 @@ class Gateway:
 
     def answer(self, batch: list[tuple[str, int | None]]) -> None:
         known = {job["id"] for job in self.book.all()}
-        reply = self._with_typing(lambda: self.turn.run([line for line, _ in batch])) or "(no reply)"
+        reports = []
+        while not self.reports.empty():
+            reports.append(self.reports.get_nowait())
+        reply = self._with_typing(lambda: self.turn.run(reports + [line for line, _ in batch])) or "(no reply)"
         message_ids = [m for _, m in batch if m]
         self.store.append_history(_stamp(f"mentor: {reply}"))
         sent = _retry(lambda: self.chat.send(reply, reply_to=message_ids[-1] if message_ids else None))

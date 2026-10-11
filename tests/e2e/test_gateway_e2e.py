@@ -38,8 +38,7 @@ def test_message_reply_and_job_report(tmp_path, monkeypatch):
                 jobs.start(book, "Research X", "brief")
             return super().run(request)
 
-    codex = SlowAgent(AgentResult("Started job 1.", "s1"), AgentResult("Job 1 is done: 3 options.", "s1"),
-                      AgentResult("ok", "s1"), AgentResult("ok", "s1"))
+    codex = SlowAgent(AgentResult("Started job 1.", "s1"), AgentResult("ok", "s1"), AgentResult("ok", "s1"))
     container = Container(store, book, Agents({"codex": codex}), TelegramChat("t", "1"), FakeRenderer())
     monkeypatch.setattr(cli, "spawn_job", lambda job_id: book.update(job_id, status="done") and 999999)
     stop = threading.Event()
@@ -48,12 +47,12 @@ def test_message_reply_and_job_report(tmp_path, monkeypatch):
     try:
         stub.enqueue("research X for me")
         assert _wait(lambda: any(m == "sendMessage" and p["text"] == "Started job 1." for m, p in stub.calls))
-        assert _wait(lambda: any(m == "sendMessage" and "3 options" in p["text"] for m, p in stub.calls))
+        assert _wait(lambda: book.read("1")["announced"] and book.read("1").get("status_closed"))
         stub.enqueue("one")
-        assert _wait(lambda: len(codex.requests) == 3)
+        assert _wait(lambda: len(codex.requests) == 2)
         stub.enqueue("two")
         stub.enqueue("three")
-        assert _wait(lambda: len(codex.requests) == 4)
+        assert _wait(lambda: len(codex.requests) == 3)
     finally:
         stop.set()
         server.join(timeout=10)
@@ -62,9 +61,10 @@ def test_message_reply_and_job_report(tmp_path, monkeypatch):
     assert first_reply["reply_parameters"]["message_id"] == 1
     status = [p for m, p in stub.calls if m == "editMessageText"]  # the reply itself carries the job status
     assert status[-1]["message_id"] == book.read("1")["status_msg"] and book.read("1")["status_closed"]
-    assert status[-1]["text"].startswith("Started job 1.\n\n✅ job 1 done")
-    assert codex.requests[1].prompt.split("] ", 1)[1].startswith("[job 1 finished] Research X")
-    assert "you: two" in codex.requests[3].prompt and "you: three" in codex.requests[3].prompt  # batched
+    assert status[-1]["text"].startswith("Started job 1.\n\n✅ job 1 done") and "no report written" in status[-1]["text"]
+    assert len([m for m, p in stub.calls if m == "sendMessage"]) == 3  # replies to "research", "one", "two three"
+    assert "[job 1 finished] Research X" in codex.requests[1].prompt and "you: one" in codex.requests[1].prompt
+    assert "you: two" in codex.requests[2].prompt and "you: three" in codex.requests[2].prompt  # batched
     history = store.read_history(date.today())
     assert "you: research X for me" in history and "mentor: Started job 1." in history
     assert store.read_state()["last_update_id"] == 4 and book.read("1")["announced"]

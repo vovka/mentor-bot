@@ -60,12 +60,15 @@ class TelegramChat:
     def send_photo(self, png: bytes, caption: str) -> int:
         return self._upload("sendPhoto", "photo", "diagram.png", png, caption, "image/png", _CALL_TIMEOUT * 3)
 
-    def send_document(self, data: bytes, filename: str, caption: str = "") -> int:
+    def send_document(self, data: bytes, filename: str, caption: str = "", reply_to: int | None = None) -> int:
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-        return self._upload("sendDocument", "document", filename, data, caption, content_type, _UPLOAD_TIMEOUT)
+        return self._upload("sendDocument", "document", filename, data, caption, content_type, _UPLOAD_TIMEOUT,
+                            reply_to)
 
-    def _upload(self, method, file_field, filename, data, caption, content_type, timeout) -> int:
+    def _upload(self, method, file_field, filename, data, caption, content_type, timeout, reply_to=None) -> int:
         fields = {"chat_id": self._chat_id, "caption": caption[:1024]}
+        if reply_to:
+            fields["reply_parameters"] = json.dumps({"message_id": reply_to})
         body, header = _multipart(fields, file_field, filename, data, content_type)
         req = urllib.request.Request(f"{self._base}/{method}", data=body, headers={"Content-Type": header})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
