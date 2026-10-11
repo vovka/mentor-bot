@@ -1,15 +1,7 @@
 {
-  "provider": "codex",
-  "model": "gpt-5.5",
-  "effort": "low",
-  "plan": {
-    "provider": "codex",
-    "model": "gpt-5.6-sol",
-    "effort": "medium"
-  },
-  "heavy": {
-    "provider": "codex",
-    "model": "gpt-5.6-sol",
-    "effort": "high"
-  }
+  "chat": {"provider": "codex", "model": "gpt-5.6-luna", "effort": "low"},
+  "job": {"provider": "codex", "model": "gpt-6-astra", "effort": "high"},
+  "morning": {"provider": "codex", "model": "gpt-6-astra", "effort": "medium"},
+  "chat_fallback": {"provider": "claude", "model": "haiku", "effort": "low"},
+  "job_fallback": {"provider": "claude", "model": "opus", "effort": "high"}
 }
