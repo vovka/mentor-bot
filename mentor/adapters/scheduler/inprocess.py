@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-DEFAULT_SCHEDULE = {"morning": "08:00", "replan": "Sun 20:00", "compact": "Sun 21:00"}
+DEFAULT_SCHEDULE = {"morning": "08:00", "deadline": "09:00", "replan": "Sun 20:00", "compact": "Sun 21:00"}
 _WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 

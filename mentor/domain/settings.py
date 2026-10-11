@@ -8,7 +8,6 @@ ALLOWED = {
         "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
         "gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max", "ultra"],
-        "gpt-6-astra": ["low", "medium", "high", "xhigh", "max", "ultra"],
         "gpt-reserve": ["low", "medium", "high", "xhigh", "max"],
     },
     "claude": {
@@ -38,3 +37,20 @@ def validate(provider: str, model: str, effort: str) -> BrainSettings:
     if effort not in efforts:
         raise ValueError(f"unknown effort {effort!r} for {provider}/{model}; allowed: {efforts}")
     return BrainSettings(provider=provider, model=model, effort=effort)
+
+
+DEFAULT_CODER = {"provider": "claude", "model": "sonnet", "effort": "high"}
+DEFAULT_HEAVY = {"provider": "codex", "model": "gpt-5.6-sol", "effort": "high"}
+DEFAULT_PLAN = {"provider": "codex", "model": "gpt-5.6-sol", "effort": "medium"}
+DEFAULT_WORK = {"daily_runs": 12}
+
+
+def tier(raw: dict, name: str) -> BrainSettings:
+    """chat = top-level provider/model/effort; plan, heavy and coder = their key, else the default."""
+    defaults = {"plan": DEFAULT_PLAN, "heavy": DEFAULT_HEAVY, "coder": DEFAULT_CODER}
+    src = raw if name == "chat" else raw.get(name, defaults[name])
+    return BrainSettings(src["provider"], src["model"], src["effort"])
+
+
+def work_limits(raw: dict) -> dict:
+    return {**DEFAULT_WORK, **raw.get("work", {})}

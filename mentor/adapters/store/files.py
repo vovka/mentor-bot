@@ -1,18 +1,23 @@
 """FileStore: Markdown/JSON persistence under DATA_DIR."""
 
 import json
+import os
 import shutil
 from datetime import date
 from pathlib import Path
 
+from mentor.adapters.store.lock import locked
 from mentor.domain.project import Project
 from mentor.domain.settings import BrainSettings
+from mentor.domain import tasks as task_graph
+from mentor.domain.tasks import Task
 
 DEFAULT_SETTINGS = {
     "provider": "codex",
     "model": "gpt-5.5",
     "effort": "low",
-    "heavy": {"provider": "codex", "model": "gpt-6-astra", "effort": "high"},
+    "plan": {"provider": "codex", "model": "gpt-5.6-sol", "effort": "medium"},
+    "heavy": {"provider": "codex", "model": "gpt-5.6-sol", "effort": "high"},
 }
 
 
@@ -51,16 +56,18 @@ class FileStore:
     def write_settings(self, settings: BrainSettings) -> None:
         current = self.read_settings()
         current.update(provider=settings.provider, model=settings.model, effort=settings.effort)
-        (self.data_dir / "settings.json").write_text(json.dumps(current, indent=2))
+        self._atomic_write(self.data_dir / "settings.json", json.dumps(current, indent=2))
 
-    def write_heavy_settings(self, settings: BrainSettings) -> None:
+    def write_tier(self, name: str, settings: BrainSettings) -> None:
+        if name == "chat":
+            return self.write_settings(settings)
         current = self.read_settings()
-        current["heavy"] = {
+        current[name] = {
             "provider": settings.provider,
             "model": settings.model,
             "effort": settings.effort,
         }
-        (self.data_dir / "settings.json").write_text(json.dumps(current, indent=2))
+        self._atomic_write(self.data_dir / "settings.json", json.dumps(current, indent=2))
 
     def read_state(self) -> dict:
         path = self.data_dir / "state.json"
@@ -69,13 +76,26 @@ class FileStore:
         return json.loads(path.read_text())
 
     def write_state(self, state: dict) -> None:
-        (self.data_dir / "state.json").write_text(json.dumps(state, indent=2))
+        self._atomic_write(self.data_dir / "state.json", json.dumps(state, indent=2))
+
+    def read_tasks(self) -> list[Task]:
+        path = self.data_dir / "tasks.json"
+        return task_graph.parse(path.read_text()) if path.exists() else []
+
+    def write_tasks(self, tasks: list[Task]) -> None:
+        self._atomic_write(self.data_dir / "tasks.json", task_graph.dump(tasks))
+
+    def _atomic_write(self, path: Path, text: str) -> None:
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(text)
+        os.replace(tmp, path)
 
     def _history_path(self, day: date) -> Path:
         return self.data_dir / "history" / f"{day.isoformat()}.md"
 
     def append_history(self, text: str) -> None:
-        with open(self._history_path(date.today()), "a") as f:
+        """Under the data lock: chat threads and the executor append concurrently. Caller must not hold it."""
+        with locked(self.data_dir), open(self._history_path(date.today()), "a") as f:
             f.write(text + "\n")
 
     def read_history(self, day: date) -> str:

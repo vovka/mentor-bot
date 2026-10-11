@@ -1,0 +1,8 @@
+[Unit]
+Description=Mentor bot: autonomous work loop
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/dev/mentor-bot
+EnvironmentFile=%h/dev/mentor-bot/.env
+ExecStart=%h/dev/mentor-bot/.venv/bin/mentor job work

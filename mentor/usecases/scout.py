@@ -4,11 +4,12 @@ from pathlib import Path
 
 from mentor.domain.actions import BrainTask
 from mentor.domain.settings import BrainSettings
+from mentor.usecases import progress
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "scout.md"
 
 
-def run(store, brain, project: str, question: str) -> str:
+def run(store, brain, chat, project: str, question: str, reply_to: int | None = None) -> str:
     match = next((p for p in store.projects() if p.name == project), None)
     if match is None:
         return f"unknown project: {project}"
@@ -20,4 +21,4 @@ def run(store, brain, project: str, question: str) -> str:
         write=False,
         settings=BrainSettings(raw["provider"], raw["model"], raw["effort"]),
     )
-    return brain.run(task).reply
+    return progress.tracked(chat, brain, task, f"Scouting {match.name}", "scout", reply_to=reply_to).reply

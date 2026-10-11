@@ -1,3 +1,6 @@
+> Historical: the original implementation plan (2026-09-29). The current design is in
+> [ARCHITECTURE.md](ARCHITECTURE.md).
+
 # Mentor bot — implementation plan (Option B, Codex default)
 
 ## Context
@@ -24,7 +27,7 @@ Two design changes from the docs, driven by Codex facts found on this machine:
    use case writes it via the store. Model switching is validated by code, never by the agent
    editing `settings.json`.
 2. `~/.codex/config.toml` sets `model_provider="headroom"` (local proxy 127.0.0.1:8787) →
-   every codex call passes `--ignore-user-config` (auth.json still applies; MCP servers in the user config hang headless) plus a subprocess timeout.
+   every codex call passes `--ignore-user-config` (auth.json still applies; MCP servers in the user config hang headless).
 
 ## File tree (≤100 lines per file)
 

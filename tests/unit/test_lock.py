@@ -23,3 +23,28 @@ def test_lock_serializes_concurrent_increments(tmp_path):
 
     state = json.loads((tmp_path / "state.json").read_text())
     assert state["count"] == 100
+
+
+def test_named_lock_blocks_a_second_acquirer_until_released(tmp_path):
+    holding, release, order = threading.Event(), threading.Event(), []
+
+    def first():
+        with locked(tmp_path, ".work.lock"):
+            holding.set()
+            release.wait()
+            order.append("first")
+
+    def second():
+        with locked(tmp_path, ".work.lock"):
+            order.append("second")
+
+    t1 = threading.Thread(target=first)
+    t1.start()
+    holding.wait()
+    t2 = threading.Thread(target=second)
+    t2.start()
+    t2.join(0.2)
+    assert t2.is_alive() and order == []
+    release.set()
+    t1.join(), t2.join()
+    assert order == ["first", "second"]

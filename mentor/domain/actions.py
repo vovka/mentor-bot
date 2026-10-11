@@ -3,7 +3,7 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from mentor.domain.settings import BrainSettings
 
@@ -26,6 +26,9 @@ class BrainTask:
     cwd: str
     write: bool
     settings: BrainSettings
+    extra_dirs: tuple[str, ...] = ()  # more dirs the brain may write to when write=True
+    # set: the adapter streams the CLI's events and reports each step as a short line
+    on_step: Callable[[str], None] | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)

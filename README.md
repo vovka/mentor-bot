@@ -1,8 +1,10 @@
-# Mentor bot
+# Mentor assistant bot
 
-A personal Telegram mentor for anything you're working on: a business, a side project, a
-job hunt, home chores, a move, studies. It keeps one pinned plan across all of them, sends a
-morning brief with today's actions, and lets you change the plan by just talking to it.
+A personal Telegram mentor-assistant for anything you're working on: a business, a side
+project, a job hunt, home chores, a move, studies. It keeps one task graph across all of them,
+sends a morning brief, and does the tasks it can (research, drafts, files, code on a branch).
+What it can't do, it prepares and hands to you: you get the files, the exact action and a Done
+button. You change the plan by just talking to it.
 
 It runs the `codex` and `claude` CLIs on your existing **ChatGPT or Claude subscription**, so
 it needs no API keys. Python 3.12, standard library only.
@@ -10,8 +12,8 @@ it needs no API keys. Python 3.12, standard library only.
 ```mermaid
 flowchart LR
   You((you)) <-- Telegram --> BOT[mentor bot]
-  BOT -- 08:00 brief · pinned plan · images --> You
-  BOT --> D[(data/projects/*)]
+  BOT -- 08:00 brief · pinned plan · reports · files --> You
+  BOT --> D[(data/tasks.json · projects/*)]
   BOT -. subscription .-> CX[codex exec]
   BOT -. subscription .-> CL[claude -p]
 ```
@@ -21,13 +23,34 @@ flowchart LR
 | You say | Bot does |
 |---|---|
 | "what's due this week?" | answers from plans and timelines |
-| "move the dentist to Friday" | replans with a heavier model, updates the pinned message |
-| "switch to gpt-6-astra high" | validates and changes model/effort |
+| "move the dentist to Friday" | queues a replan; the planner returns only the edits (add / set / move) and the pinned message is updated |
+| "switch to gpt-5.6-sol high" | validates and changes model/effort of a tier (chat, plan, heavy, coder) |
+| "investigate the application forms in the browser" | any ad-hoc work becomes a task at the front of the queue and runs next |
+| "/cancel" | stops the brain run in progress; the queue continues |
 | "send a Gantt of the plan" | renders Mermaid to PNG and posts it |
 | "what's in the website repo?" | reads a project's linked folder or repo, read-only |
+| (silent since yesterday, 08:00) | asks Yes/No, proposes moves for undone tasks, writes plan.md on Approve |
 | "add project renovation" | creates `data/projects/renovation/` from the template |
+| "what's next?" | answers from the plan's Next line |
+| "go on" | starts the work loop now |
+| "I submitted the form" | marks that task done, the loop continues |
+| (a task needs a risky step) | sends a proposal with Approve / Approve · other provider / Reject |
+
+Every answer is a Telegram reply to the message it belongs to, and messages are handled concurrently, so you can keep writing while an earlier one is processed. Replans and tasks run one at a time through a durable queue (the morning reconcile only proposes changes, so it runs right away and never waits behind a task); the bot posts "Queued (2nd)" and edits it into the live progress message.
 
 While it works you see 👀 on your message and "typing…"; 🤔 means a heavy step is running.
+
+## What it does without asking
+
+The worker takes the next ready task from `data/tasks.json` and ends it as done, needs approval,
+needs you, or failed. The rules are in `prompts/work.md`.
+
+| Without asking | Needs your approval | Stays with you |
+|---|---|---|
+| files in the task's work dir | system packages, global installs | submitting forms |
+| commits on a new branch of the project repo (no push) | containers, VMs, downloads over ~500 MB | sending emails (drafts only) |
+| installs inside the work dir | deploying, anything public | payments, logging in |
+| reading the public web | accounts, spending, files outside work dir and repo | live recordings, personal decisions |
 
 ## Quick start
 
@@ -59,10 +82,18 @@ data/plan.md    cross-project plan, rendered into the pinned message
 ## Scheduled jobs
 
 ```bash
-mentor job morning   # daily brief (idempotent per day)
+mentor job morning   # 08:00 check-in, then the daily brief (idempotent per day)
+mentor job deadline  # 09:00: no answer to the check-in -> reconcile the plan
 mentor job replan    # weekly replan
 mentor job compact   # fold old chat history into summary.md
+mentor job work      # work loop: next ready task until none is left or the daily budget is used
 ```
+
+`morning` and `deadline` reconcile directly (the brief is never held behind a task), `replan` queues a job;
+all three then run the executor. The executor drains queued replans before tasks, then takes the next ready task. It also starts
+after button presses, the chat actions `work`, `add_task` and `task_update`, and at `serve` startup;
+an hourly timer is the safety net. One instance runs at a time: a second one waits for the lock, and at most one waits.
+Output goes to `data/work.log`.
 
 Run them from cron, systemd timers, or `mentor serve --with-scheduler`. See
 [deploy/README.md](deploy/README.md) for all three and for Docker.
@@ -77,8 +108,15 @@ Run them from cron, systemd timers, or `mentor serve --with-scheduler`. See
 | `TZ` | `Europe/Kyiv` | schedule and "today" |
 | `CLAUDE_CODE_OAUTH_TOKEN` | empty | enables the Claude brain |
 | `KROKI_URL` | `https://kroki.io` | Mermaid renderer; self-host to keep plans private |
+| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | empty | email drafts saved to Gmail Drafts over IMAP; unset: draft text is sent in Telegram |
+| `BROWSER_CDP_URL` | empty | attach the Playwright MCP server to a running Chrome so the worker can read pages behind logins; needs `npx` on the service's PATH |
 
-Chat and heavy model settings live in `data/settings.json` and are changed by chatting.
+Model settings live in `data/settings.json` and are changed by chatting. Tiers: chat (default codex
+`gpt-5.5` low), `plan` (replan and reconcile; `gpt-5.6-sol` medium), `heavy` (`research` and `writing`
+tasks; `gpt-5.6-sol` high). There are no brain timeouts: a run is stopped only by `/cancel` or after
+60 minutes without any output.
+`coder` is another tier with the same fields, used for `coding` and `system` tasks (default
+Claude `sonnet` `high`); `work` sets `daily_runs` (default 12; queued jobs do not count).
 
 ## Tests
 
@@ -89,13 +127,18 @@ scripts/live_smoke.sh             # manual check with real Telegram and a real b
 
 ## Architecture
 
-Clean architecture, light: `domain/`, `usecases/`, `ports/`, `adapters/`, `app/`. The brain
-never writes files. It returns `{reply, document, actions}`, and the use cases execute them.
+Clean architecture, light: `domain/`, `usecases/`, `ports/`, `adapters/`, `app/`. In chat and
+planning the brain never writes files: it returns `{reply, document, actions}` (a replan
+document is `{"ops": [...]}`), and the use
+cases execute them. Only the worker runs a write-enabled brain.
 Diagrams are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Notes
 
-- Codex on this setup runs with `--ignore-user-config`, stdin closed, and a read-only sandbox.
+- Codex runs with `--ignore-user-config` and stdin closed. Chat and planning use a read-only sandbox.
+- Worker writes: on the host Codex is kernel-sandboxed to the work dir (and the project repo for
+  coding tasks); Claude is limited by its permission rules only, with no kernel sandbox.
+- "Never submit", "never send" and "browser is read-only" are rules in the prompt, not mechanisms.
 - On Ubuntu 24.04, apply `deploy/apparmor-bwrap` so the Codex sandbox can start.
 - A single-user bot on your own subscription matches the documented CI use of these CLIs. Do not
   offer it to others on your login.

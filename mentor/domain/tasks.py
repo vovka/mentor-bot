@@ -1,0 +1,146 @@
+"""Task graph: pure parsing, validation, merging and rendering."""
+
+import json
+import re
+from dataclasses import asdict, dataclass, field, fields
+from graphlib import CycleError, TopologicalSorter
+
+KINDS = ("research", "writing", "coding", "system", "user")
+STATUSES = ("todo", "running", "awaiting_approval", "awaiting_user", "done", "failed", "dropped")
+RUNTIME = ("files", "approved", "provider", "proposal", "reply_to")
+_ID = re.compile(r"[A-Za-z0-9_-]{1,48}")  # ids travel in Telegram callback data (64 bytes, `:`-separated)
+
+
+@dataclass
+class Task:
+    id: str
+    title: str
+    project: str = ""
+    kind: str = "research"
+    deps: list[str] = field(default_factory=list)
+    due: str = ""
+    status: str = "todo"
+    note: str = ""
+    files: list[str] = field(default_factory=list)
+    approved: bool = False
+    provider: str = ""
+    proposal: str = ""
+    reply_to: int = 0  # chat message that asked for this task; its progress message replies to it
+
+
+def parse(text: str) -> list[Task]:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"invalid JSON: {e}") from e
+    if not isinstance(data, dict) or not isinstance(data.get("tasks"), list):
+        raise ValueError("missing 'tasks' list")
+    names = {f.name for f in fields(Task)}
+    tasks = [_build(item, names) for item in data["tasks"]]
+    _validate(tasks)
+    return tasks
+
+
+def _build(item: dict, names: set[str]) -> Task:
+    if not isinstance(item, dict) or not item.get("id") or not item.get("title"):
+        raise ValueError("every task needs a non-empty id and title")
+    return Task(**{k: v for k, v in item.items() if k in names})
+
+
+def _validate(tasks: list[Task]) -> None:
+    for t in tasks:
+        _check_types(t)
+    ids = [t.id for t in tasks]
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate task id")
+    for t in tasks:
+        if not _ID.fullmatch(t.id):
+            raise ValueError(f"task id {t.id!r}: use up to 48 letters, digits, '-' or '_'")
+        if t.kind not in KINDS or t.status not in STATUSES:
+            raise ValueError(f"task {t.id}: unknown kind or status")
+        for dep in t.deps:
+            if dep not in ids:
+                raise ValueError(f"task {t.id}: unknown dep {dep}")
+    try:
+        tuple(TopologicalSorter({t.id: t.deps for t in tasks}).static_order())
+    except CycleError as e:
+        raise ValueError("dependency cycle") from e
+
+
+def _check_types(t: Task) -> None:
+    """Planner output is untrusted JSON: a wrong type is a readable ValueError, never a TypeError later."""
+    for name in ("id", "title", "project", "kind", "due", "status", "note"):
+        if not isinstance(getattr(t, name), str):
+            raise ValueError(f"task {t.id!r}: {name} must be a string")
+    if not isinstance(t.deps, list) or not all(isinstance(d, str) for d in t.deps):
+        raise ValueError(f"task {t.id!r}: deps must be a list of ids")
+
+
+def dump(tasks: list[Task]) -> str:
+    return json.dumps({"tasks": [asdict(t) for t in tasks]}, indent=2, ensure_ascii=False)
+
+
+def brief(tasks: list[Task]) -> str:
+    """Compact planner view: one line per live task, one id-only line for the closed ones."""
+    live = [t for t in tasks if t.status not in ("done", "dropped")]
+    closed = [t.id for t in tasks if t.status in ("done", "dropped")]
+    lines = [_brief_line(t) for t in live]
+    return "\n".join(lines + ([f"done/dropped: {', '.join(closed)}"] if closed else []))
+
+
+def _brief_line(t: Task) -> str:
+    deps = f"deps={','.join(t.deps)}" if t.deps else "deps="
+    tail = f"{t.title} — {t.note}" if t.note else t.title
+    return " | ".join([t.id, t.status, t.kind, t.project, t.due, deps, tail])
+
+
+def next_ready(tasks: list[Task]) -> Task | None:
+    state = {t.id: t.status for t in tasks}
+    for t in tasks:
+        if t.status == "todo" and all(state[d] in ("done", "dropped") for d in t.deps):
+            return t
+    return None
+
+
+def merge(old: list[Task], new: list[Task]) -> list[Task]:
+    """Take `new`'s content; runtime fields and status come from `old`, never from the planner."""
+    olds = {t.id: t for t in old}
+    for t in new:
+        prev = olds.get(t.id)
+        source = prev or Task(t.id, t.title)  # a new task starts unapproved, with no files or proposal
+        for name in RUNTIME:
+            setattr(t, name, getattr(source, name))
+        if t.status not in ("done", "dropped"):
+            t.status = prev.status if prev else "todo"
+    new_ids = {t.id for t in new}
+    flying = [t for t in old if t.status == "running" and t.id not in new_ids]
+    for t in flying:
+        t.deps = [d for d in t.deps if d in new_ids]  # its other deps left with the old plan
+    return flying + new
+
+
+def _line(t: Task, tail: str = "") -> str:
+    return f"- {t.title}{tail}"
+
+
+def render(tasks: list[Task]) -> str:
+    if not tasks:
+        return "No tasks yet."
+    nxt = next_ready(tasks)
+    by = lambda *s: [t for t in tasks if t.status in s]  # noqa: E731
+    todo = [t for t in by("todo") if t is not nxt][:5]
+    waiting = [_line(t, f" — {t.note}" if t.note else "") for t in by("awaiting_approval", "awaiting_user")]
+    parts = [
+        [f"**Next:** {_next(nxt)}"] if nxt else [],
+        ["**In progress:**", *map(_line, by("running"))] if by("running") else [],
+        ["**Waiting on you:**", *waiting] if waiting else [],
+        ["**Failed:**", *map(_line, by("failed"))] if by("failed") else [],
+        ["**Then:**", *map(_line, todo)] if todo else [],
+    ]
+    live = [t for t in tasks if t.status != "dropped"]
+    done = f"Done: {len(by('done'))} of {len(live)}"
+    return "\n\n".join(["\n".join(p) for p in parts if p] + [done])
+
+
+def _next(t: Task) -> str:
+    return t.title + (f" ({t.project})" if t.project else "") + (f" · due {t.due}" if t.due else "")

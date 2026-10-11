@@ -8,23 +8,41 @@
       "items": {
         "type": "object",
         "properties": {
-          "kind": { "type": "string", "enum": ["replan", "scout", "set_settings", "add_project", "send_image"] },
+          "kind": { "type": "string", "enum": ["replan", "scout", "set_settings", "add_project", "send_image", "work", "task_update", "task_result", "send_files", "add_task"] },
           "args": {
             "type": "object",
             "properties": {
               "reason": { "type": ["string", "null"] },
+              "title": { "type": ["string", "null"] },
               "project": { "type": ["string", "null"] },
               "question": { "type": ["string", "null"] },
               "provider": { "type": ["string", "null"] },
               "model": { "type": ["string", "null"] },
               "effort": { "type": ["string", "null"] },
-              "heavy": { "type": ["boolean", "null"] },
+              "tier": { "type": ["string", "null"] },
               "name": { "type": ["string", "null"] },
               "repo_path": { "type": ["string", "null"] },
               "diagram": { "type": ["string", "null"] },
-              "caption": { "type": ["string", "null"] }
+              "caption": { "type": ["string", "null"] },
+              "task_id": { "type": ["string", "null"] },
+              "status": { "type": ["string", "null"] },
+              "note": { "type": ["string", "null"] },
+              "outcome": { "type": ["string", "null"] },
+              "files": { "type": ["array", "null"], "items": { "type": "string" } },
+              "send": { "type": ["array", "null"], "items": { "type": "string" } },
+              "user_action": { "type": ["string", "null"] },
+              "proposal": { "type": ["string", "null"] },
+              "drafts": {
+                "type": ["array", "null"],
+                "items": {
+                  "type": "object",
+                  "properties": { "to": { "type": "string" }, "subject": { "type": "string" }, "body": { "type": "string" } },
+                  "required": ["to", "subject", "body"],
+                  "additionalProperties": false
+                }
+              }
             },
-            "required": ["reason", "project", "question", "provider", "model", "effort", "heavy", "name", "repo_path", "diagram", "caption"],
+            "required": ["reason", "title", "project", "question", "provider", "model", "effort", "tier", "name", "repo_path", "diagram", "caption", "task_id", "status", "note", "outcome", "files", "send", "user_action", "proposal", "drafts"],
             "additionalProperties": false
           }
         },

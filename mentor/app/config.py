@@ -24,6 +24,8 @@ class Config:
     tz: str
     claude_code_oauth_token: str
     kroki_url: str
+    gmail_user: str
+    gmail_app_password: str
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -35,4 +37,6 @@ class Config:
             tz=os.environ.get("TZ", "Europe/Kyiv"),
             claude_code_oauth_token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", ""),
             kroki_url=os.environ.get("KROKI_URL", "https://kroki.io"),
+            gmail_user=os.environ.get("GMAIL_USER", ""),
+            gmail_app_password=os.environ.get("GMAIL_APP_PASSWORD", ""),
         )
