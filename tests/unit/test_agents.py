@@ -55,6 +55,7 @@ def test_codex_command_chat_vs_job(tmp_path):
     agent = CodexAgent()
     chat = agent.command(_run(tmp_path, session="abc"))
     assert chat[:4] == ["codex", "exec", "resume", "abc"] and "--ignore-user-config" in chat
+    assert chat[chat.index("apps") - 1] == "--disable"  # account apps would bury the mentor tools
     assert 'sandbox_mode="read-only"' in chat and chat[-2:] == ["--", "hi"]
     job = agent.command(_run(tmp_path, user_tools=True, sandbox=Sandbox(("/w",), ("/s/.env",))))
     profile = next(c for c in job if c.startswith("permissions.mentor.filesystem="))

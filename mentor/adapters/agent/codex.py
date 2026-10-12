@@ -38,6 +38,8 @@ class CodexAgent:
             flags += [part for name in _UNSAFE_MCP for part in ("-c", f"mcp_servers.{name}.enabled=false")]
         else:
             flags.append("--ignore-user-config")  # chat: no user MCPs/plugins, ~4 s per turn instead of ~17 s
+            # the ChatGPT account's apps (Drive, GitHub, ...) load even so: 500+ tools that bury the mentor ones
+            flags += ["--disable", "apps", "--disable", "plugins"]
         flags += _sandbox_flags(r)
         return head + flags + ["--", r.prompt]
 
