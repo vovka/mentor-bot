@@ -1,146 +1,154 @@
-"""Task graph: pure parsing, validation, merging and rendering."""
+"""Aims and tasks: the user's agenda. Pure data and validated operations, no I/O."""
 
-import json
-import re
 from dataclasses import asdict, dataclass, field, fields
-from graphlib import CycleError, TopologicalSorter
+from datetime import date
 
-KINDS = ("research", "writing", "coding", "system", "user")
-STATUSES = ("todo", "running", "awaiting_approval", "awaiting_user", "done", "failed", "dropped")
-RUNTIME = ("files", "approved", "provider", "proposal", "reply_to")
-_ID = re.compile(r"[A-Za-z0-9_-]{1,48}")  # ids travel in Telegram callback data (64 bytes, `:`-separated)
+STATUSES = ("active", "paused", "disabled", "done", "removed")
+AIM_STATUSES = ("active", "paused", "done")
+
+
+@dataclass
+class Aim:
+    id: str
+    title: str
+    why: str = ""
+    target: str = ""  # ISO date or empty
+    status: str = "active"
+    project: str = ""  # slug of a folder under DATA_DIR/projects, or empty
 
 
 @dataclass
 class Task:
     id: str
     title: str
-    project: str = ""
-    kind: str = "research"
-    deps: list[str] = field(default_factory=list)
-    due: str = ""
-    status: str = "todo"
-    note: str = ""
-    files: list[str] = field(default_factory=list)
-    approved: bool = False
-    provider: str = ""
-    proposal: str = ""
-    reply_to: int = 0  # chat message that asked for this task; its progress message replies to it
+    aim: str = ""
+    status: str = "active"
+    deadline: str = ""  # ISO date or empty
+    notes: str = ""
+    priority: int | None = None  # 1 = top; set by reorder only
+    project: str = ""  # defaults to its aim's project
 
 
-def parse(text: str) -> list[Task]:
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"invalid JSON: {e}") from e
-    if not isinstance(data, dict) or not isinstance(data.get("tasks"), list):
-        raise ValueError("missing 'tasks' list")
-    names = {f.name for f in fields(Task)}
-    tasks = [_build(item, names) for item in data["tasks"]]
-    _validate(tasks)
-    return tasks
+@dataclass
+class Agenda:
+    aims: list[Aim] = field(default_factory=list)
+    tasks: list[Task] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "Agenda":
+        return cls([Aim(**_known(Aim, a)) for a in raw.get("aims", [])],
+                   [Task(**_known(Task, t)) for t in raw.get("tasks", [])])
+
+    def to_dict(self) -> dict:
+        return {"aims": [asdict(a) for a in self.aims], "tasks": [asdict(t) for t in self.tasks]}
+
+    def task(self, task_id: str) -> Task:
+        return _find(self.tasks, task_id, "task")
+
+    def aim(self, aim_id: str) -> Aim:
+        return _find(self.aims, aim_id, "aim")
+
+    def add_task(self, title: str, aim: str = "", deadline: str = "", notes: str = "", project: str = "") -> Task:
+        task = Task(_next_id(self.tasks, "t"), _title(title), notes=notes)
+        self._set_task(task, aim=aim, deadline=deadline, project=project)
+        self.tasks.append(task)
+        return task
+
+    def update_task(self, task_id: str, **changes) -> Task:
+        task = self.task(task_id)
+        self._set_task(task, **changes)
+        return task
+
+    def add_aim(self, title: str, why: str = "", target: str = "", project: str = "") -> Aim:
+        aim = Aim(_next_id(self.aims, "a"), _title(title), why, _date(target), project=project)
+        self.aims.append(aim)
+        return aim
+
+    def update_aim(self, aim_id: str, **changes) -> Aim:
+        aim = self.aim(aim_id)
+        for key, value in changes.items():
+            if key == "status" and value not in AIM_STATUSES:
+                raise ValueError(f"aim status must be one of {AIM_STATUSES}")
+            if key not in ("title", "why", "target", "status", "project"):
+                raise ValueError(f"unknown aim field {key!r}")
+            setattr(aim, key, _date(value) if key == "target" else _title(value) if key == "title" else value)
+        return aim
+
+    def reorder(self, ids: list[str]) -> None:
+        """`ids` top first; every other task loses its rank."""
+        ranked = [self.task(i) for i in ids]
+        if len(set(ids)) != len(ids):
+            raise ValueError("duplicate task ids in order")
+        for task in self.tasks:
+            task.priority = None
+        for rank, task in enumerate(ranked, 1):
+            task.priority = rank
+
+    def open_tasks(self, project: str = "") -> list[Task]:
+        """Active and paused tasks, ranked first; only one project's when given."""
+        live = [t for t in self.tasks if t.status in ("active", "paused") and project in ("", t.project)]
+        return sorted(live, key=lambda t: (t.priority is None, t.priority or 0, _num(t.id)))
+
+    def _set_task(self, task: Task, **changes) -> None:
+        for key, value in changes.items():
+            if key not in ("title", "aim", "status", "deadline", "notes", "project"):
+                raise ValueError(f"unknown task field {key!r}")
+            if key == "aim" and value:
+                self.aim(value)
+            if key == "status" and value not in STATUSES:
+                raise ValueError(f"status must be one of {STATUSES}")
+            setattr(task, key, _date(value) if key == "deadline" else _title(value) if key == "title" else value)
+        if task.aim and not task.project:
+            task.project = self.aim(task.aim).project
 
 
-def _build(item: dict, names: set[str]) -> Task:
-    if not isinstance(item, dict) or not item.get("id") or not item.get("title"):
-        raise ValueError("every task needs a non-empty id and title")
-    return Task(**{k: v for k, v in item.items() if k in names})
+def render(agenda: Agenda, project: str = "") -> str:
+    """Compact Markdown for prompts and chat; only one project's aims and tasks when given."""
+    aims = [a for a in agenda.aims if project in ("", a.project)]
+    lines = ["Aims:"] + [f"- {a.id} [{a.status}] {a.title}" + _parens(a.project, a.target and f"target {a.target}")
+                         + (f" — {a.why}" if a.why else "") for a in aims]
+    lines.append("Open tasks (priority order):")
+    for t in agenda.open_tasks(project):
+        rank = f"#{t.priority} " if t.priority else ""
+        lines.append(f"- {rank}{t.id} {t.title}" + _parens(t.status if t.status != "active" else "", t.project,
+                                                             t.aim and f"aim {t.aim}", t.deadline and f"due {t.deadline}"))
+    return "\n".join(lines)
 
 
-def _validate(tasks: list[Task]) -> None:
-    for t in tasks:
-        _check_types(t)
-    ids = [t.id for t in tasks]
-    if len(set(ids)) != len(ids):
-        raise ValueError("duplicate task id")
-    for t in tasks:
-        if not _ID.fullmatch(t.id):
-            raise ValueError(f"task id {t.id!r}: use up to 48 letters, digits, '-' or '_'")
-        if t.kind not in KINDS or t.status not in STATUSES:
-            raise ValueError(f"task {t.id}: unknown kind or status")
-        for dep in t.deps:
-            if dep not in ids:
-                raise ValueError(f"task {t.id}: unknown dep {dep}")
-    try:
-        tuple(TopologicalSorter({t.id: t.deps for t in tasks}).static_order())
-    except CycleError as e:
-        raise ValueError("dependency cycle") from e
+def _parens(*parts: str) -> str:
+    shown = [p for p in parts if p]
+    return f" ({', '.join(shown)})" if shown else ""
 
 
-def _check_types(t: Task) -> None:
-    """Planner output is untrusted JSON: a wrong type is a readable ValueError, never a TypeError later."""
-    for name in ("id", "title", "project", "kind", "due", "status", "note"):
-        if not isinstance(getattr(t, name), str):
-            raise ValueError(f"task {t.id!r}: {name} must be a string")
-    if not isinstance(t.deps, list) or not all(isinstance(d, str) for d in t.deps):
-        raise ValueError(f"task {t.id!r}: deps must be a list of ids")
+def _find(items, item_id: str, kind: str):
+    for item in items:
+        if item.id == item_id:
+            return item
+    raise ValueError(f"no {kind} {item_id!r}")
 
 
-def dump(tasks: list[Task]) -> str:
-    return json.dumps({"tasks": [asdict(t) for t in tasks]}, indent=2, ensure_ascii=False)
+def _next_id(items, prefix: str) -> str:
+    return f"{prefix}{max((_num(i.id) for i in items), default=0) + 1}"
 
 
-def brief(tasks: list[Task]) -> str:
-    """Compact planner view: one line per live task, one id-only line for the closed ones."""
-    live = [t for t in tasks if t.status not in ("done", "dropped")]
-    closed = [t.id for t in tasks if t.status in ("done", "dropped")]
-    lines = [_brief_line(t) for t in live]
-    return "\n".join(lines + ([f"done/dropped: {', '.join(closed)}"] if closed else []))
+def _num(item_id: str) -> int:
+    digits = item_id[1:]
+    return int(digits) if digits.isdigit() else 0
 
 
-def _brief_line(t: Task) -> str:
-    deps = f"deps={','.join(t.deps)}" if t.deps else "deps="
-    tail = f"{t.title} — {t.note}" if t.note else t.title
-    return " | ".join([t.id, t.status, t.kind, t.project, t.due, deps, tail])
+def _title(value: str) -> str:
+    value = (value or "").strip()
+    if not value:
+        raise ValueError("title must not be empty")
+    return value
 
 
-def next_ready(tasks: list[Task]) -> Task | None:
-    state = {t.id: t.status for t in tasks}
-    for t in tasks:
-        if t.status == "todo" and all(state[d] in ("done", "dropped") for d in t.deps):
-            return t
-    return None
+def _date(value: str) -> str:
+    if value:
+        date.fromisoformat(value)  # raises ValueError on a bad date
+    return value or ""
 
 
-def merge(old: list[Task], new: list[Task]) -> list[Task]:
-    """Take `new`'s content; runtime fields and status come from `old`, never from the planner."""
-    olds = {t.id: t for t in old}
-    for t in new:
-        prev = olds.get(t.id)
-        source = prev or Task(t.id, t.title)  # a new task starts unapproved, with no files or proposal
-        for name in RUNTIME:
-            setattr(t, name, getattr(source, name))
-        if t.status not in ("done", "dropped"):
-            t.status = prev.status if prev else "todo"
-    new_ids = {t.id for t in new}
-    flying = [t for t in old if t.status == "running" and t.id not in new_ids]
-    for t in flying:
-        t.deps = [d for d in t.deps if d in new_ids]  # its other deps left with the old plan
-    return flying + new
-
-
-def _line(t: Task, tail: str = "") -> str:
-    return f"- {t.title}{tail}"
-
-
-def render(tasks: list[Task]) -> str:
-    if not tasks:
-        return "No tasks yet."
-    nxt = next_ready(tasks)
-    by = lambda *s: [t for t in tasks if t.status in s]  # noqa: E731
-    todo = [t for t in by("todo") if t is not nxt][:5]
-    waiting = [_line(t, f" — {t.note}" if t.note else "") for t in by("awaiting_approval", "awaiting_user")]
-    parts = [
-        [f"**Next:** {_next(nxt)}"] if nxt else [],
-        ["**In progress:**", *map(_line, by("running"))] if by("running") else [],
-        ["**Waiting on you:**", *waiting] if waiting else [],
-        ["**Failed:**", *map(_line, by("failed"))] if by("failed") else [],
-        ["**Then:**", *map(_line, todo)] if todo else [],
-    ]
-    live = [t for t in tasks if t.status != "dropped"]
-    done = f"Done: {len(by('done'))} of {len(live)}"
-    return "\n\n".join(["\n".join(p) for p in parts if p] + [done])
-
-
-def _next(t: Task) -> str:
-    return t.title + (f" ({t.project})" if t.project else "") + (f" · due {t.due}" if t.due else "")
+def _known(cls, raw: dict) -> dict:
+    names = {f.name for f in fields(cls)}
+    return {k: v for k, v in raw.items() if k in names}

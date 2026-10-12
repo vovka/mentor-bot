@@ -1,9 +1,0 @@
-[Unit]
-Description=Mentor bot: weekly history compact timer
-
-[Timer]
-OnCalendar=Sun *-*-* 21:00 Europe/Kyiv
-Persistent=true
-
-[Install]
-WantedBy=timers.target

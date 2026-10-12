@@ -1,5 +1,5 @@
 [Unit]
-Description=Mentor bot long-poll service
+Description=Mentor bot: Telegram chat agent and background job launcher
 After=network-online.target
 
 [Service]
@@ -8,9 +8,10 @@ WorkingDirectory=%h/dev/mentor-bot
 EnvironmentFile=%h/dev/mentor-bot/.env
 ExecStart=%h/dev/mentor-bot/.venv/bin/mentor serve
 Restart=always
-# the kicked `mentor job work` executor outlives a restart; give handler threads time to finish
+# background jobs (`mentor job-run`) live in this cgroup and must outlive a restart
 KillMode=process
-TimeoutStopSec=300
+# the Telegram long-poll returns within ~40 s
+TimeoutStopSec=60
 
 [Install]
 WantedBy=default.target

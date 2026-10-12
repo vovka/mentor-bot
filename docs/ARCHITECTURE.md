@@ -1,496 +1,77 @@
-# Mentor assistant bot — architecture
+# Mentor bot v3: architecture
 
-Status 2026-10-02: built, 220 tests, live-tested, running as a systemd user service.
-Published page with the same diagrams (2026-10-02): https://claude.ai/code/artifact/a9610123-72e8-4d25-af88-a33789e7837f
-Older snapshot (2026-09-30, before the task graph and queue): https://claude.ai/artifact/Kz2GVi8aQ5SpxxtQVg1HFD
+Last updated: 2026-10-11 (projects, live job status). v2 (task graph, autonomous worker, replans, check-ins, buttons) was replaced because it
+acted without being asked. v3: a cheap conversational agent, a deterministic task core, background jobs on demand.
 
-## 1. What it is
-
-```mermaid
-flowchart LR
-  You((you)) <-- Telegram chat --> BOT[mentor bot]
-  BOT -- 08:00 brief --> You
-  BOT -- pinned plan --> You
-  BOT -- reports · files · approvals --> You
-  BOT --> P1[(project-one/)]
-  BOT --> P2[(project-two/)]
-  BOT --> P3[(project-three/)]
-  BOT -. subscriptions, no API keys .-> CX[codex exec]
-  BOT -. secondary and coder .-> CL[claude -p]
-```
-
-## 2. How subscriptions reach the bot
-
-```mermaid
-flowchart LR
-  subgraph ChatGPT["ChatGPT subscription (default)"]
-    LOGIN["codex login"] --> AUTH["~/.codex/auth.json"] --> CX["codex exec"]
-  end
-  subgraph Claude["Claude subscription (secondary)"]
-    ST["claude setup-token"] --> TOK["CLAUDE_CODE_OAUTH_TOKEN"]
-    TOK --> CLI["claude -p"]
-    TOK --> SDK["Claude Agent SDK"]
-    TOK -. rejected .-> HTTP["anthropic HTTP SDK = API key only"]
-  end
-  CX & CLI & SDK --> BRAIN((Brain port))
-```
-
-Never `claude --bare` (ignores OAuth). No SDK for ChatGPT subscription: subprocess only.
-
-## 3. Layers
+## Processes
 
 ```mermaid
 flowchart TB
-  subgraph app["app/ — wiring"]
-    CFG[config.py env] --> CT[container.py] --> CLIa["cli.py: serve · job · doctor"]
-    CT --> KK[kick.py]
+  TG[Telegram] <--> SERVE
+  subgraph SERVE["mentor serve (systemd: mentor.service)"]
+    POLL[poll thread] --> INBOX[(queue)]
+    WATCH["job watcher (2 s)<br/>launch queued · reap dead · edit job status · queue reports"] --> INBOX
+    INBOX --> WORKER["chat worker: one turn at a time,<br/>batches what arrived meanwhile"]
   end
-  subgraph adapters["adapters/ — all I/O"]
-    TG[telegram/ api · markdown · fake]
-    BR[brain/ router · codex_cli · claude_cli · fake]
-    MAIL[mail/ imap]
-    STO[store/ files · lock]
-    SCH[scheduler/ inprocess]
-    RND[render/ kroki · fake]
-  end
-  subgraph ports["ports/ — Protocols"]
-    PC[Chat] --- PB[Brain] --- PS[Store] --- PK[Clock] --- PR[Renderer] --- PM[Mail]
-  end
-  subgraph usecases["usecases/ — one file per verb"]
-    U1[handle_update] --> U2[handle_message]
-    U2 --> U4[queue · replan · scout · change_settings · add_project · add_task]
-    U3[morning_checkin · reconcile · checkin · morning_brief · compact]
-    U5[work · work_brain · work_result · task_buttons · task_update · apply_plan]
-    U2 --> U5
-  end
-  subgraph domain["domain/ — no I/O"]
-    D[Project · Task · Action · BrainTask · BrainResult · BrainSettings · Update]
-  end
-  app --> adapters
-  adapters -- implement --> ports
-  usecases -- use --> ports
-  usecases & ports --> domain
+  WORKER -- "codex exec [resume id] --ignore-user-config -s read-only" --> CHAT[chat agent]
+  CHAT -- stdio --> MCP1["mentor mcp --role chat"]
+  MCP1 --> DATA[(data/)]
+  WATCH -- "spawn, own session" --> RUN["mentor job-run N"]
+  RUN -- "codex exec (user config, permission profile)" --> JOB[orchestrator + subagents]
+  JOB -- stdio --> MCP2["mentor mcp --role job"]
+  TIMER["mentor-morning.timer 07:30"] --> MORN["mentor morning"] -- "codex exec" --> MA[morning agent]
+  MA -- stdio --> MCP3["mentor mcp --role morning"]
 ```
 
-Arrows point inward only. Telegram → Slack, files → S3, CLI → SDK = new adapter folder + one line in `container.py`.
+## Code layout
 
-## 4. A chat message
-
-```mermaid
-sequenceDiagram
-  actor You
-  participant TG as Telegram
-  participant AD as telegram/api.py
-  participant HU as handle_update
-  participant HM as handle_message
-  participant ST as store (data/)
-  participant BR as brain (read-only)
-  You->>TG: "move the demo to Friday"
-  TG->>AD: getUpdates
-  AD->>HU: update
-  HU->>ST: lock · dedup update_id (in poll order)
-  Note over HU,HM: each update runs in its own thread
-  HU->>HM: text, message_id
-  HM->>ST: append history/today.md
-  HM->>TG: 👀 reaction · "typing…" every 4 s until reply
-  HM->>ST: settings · summary.md · last 2 days · projects
-  HM->>BR: prompt (gpt-5.5 low)
-  BR-->>HM: {reply, document, actions:[replan]}
-  HM->>ST: push replan job to state.json jobs
-  HM->>AD: send(reply, reply_to=message_id)
-  AD->>TG: sendMessage with reply_parameters · reaction cleared
-  TG->>You: threaded reply "Replanning queued (1st in line)."
-  Note over ST,BR: the executor (mentor job work) drains the queue later
-  ST->>BR: replan, plan tier gpt-5.6-sol medium
-  BR-->>ST: {ops:[set, move, add]} applied to tasks.json
-  ST->>TG: progress message becomes the summary · pin edited
-```
-
-## 5. Brain: cheap chat, heavy planners, a write-enabled worker
-
-```mermaid
-flowchart TB
-  U[chat message] --> C["chat brain · gpt-5.5 low · read-only"]
-  C --> OUT["{reply, document, actions:[{kind,args}]}"]
-  OUT -- replan --> P["queue.push replan job<br/>executor: replan.run · plan tier<br/>ops → tasks.json → plan.md → pin"]
-  OUT -- add_task --> AT["add_task.run<br/>ad-hoc task at the top of tasks.json → kick"]
-  OUT -- scout --> S["scout.run · read-only over project repo_path"]
-  OUT -- set_settings --> V{"change_settings.run<br/>valid vs ALLOWED?"}
-  OUT -- add_project --> A{"add_project.run<br/>slug ok · repo_path exists?"}
-  OUT -- send_image --> I["send_image.run<br/>Mermaid → Kroki PNG → sendPhoto"]
-  OUT -- work --> WK["kick the worker<br/>reply: Working on the next task."]
-  OUT -- task_update --> TU["task_update.run<br/>todo · done · dropped → refresh plan → kick"]
-  V -- yes --> W1[settings.json]
-  V -- no --> R1[reply: allowed list]
-  A -- yes --> W2["data/projects/&lt;name&gt;/ from _template"]
-  A -- no --> R2[reply: rejected]
-  P & AT & S & W1 & W2 & I & WK & TU --> RES[folded into reply]
-```
-
-Images: the brain never renders. It emits `send_image{diagram, caption}`; the use case posts the
-PNG from Kroki (`KROKI_URL`, default kroki.io, self-hostable) and a failure lands in the reply text.
-
-`task_result` is a worker-only kind. The chat prompt forbids it and `output_schema.json` lists all
-kinds: replan, scout, set_settings, add_project, send_image, work, task_update, add_task, task_result.
-
-### Routing
-
-`RoutingBrain` picks the adapter from `BrainTask.settings.provider` and builds each one once;
-an unknown provider returns `brain error: unknown provider`. Four tiers in `settings.json`
-(`domain/settings.py` `tier`):
-
-| Tier | Used for | Default |
-|---|---|---|
-| chat (top-level) | chat, scout, compact | gpt-5.5 low |
-| `plan` | replan, reconcile | gpt-5.6-sol medium |
-| `heavy` | `research` and `writing` tasks | gpt-5.6-sol high |
-| `coder` | `coding` and `system` tasks | claude sonnet high |
-
-A task can run on the other tier's provider when `task.provider` names it (the
-"Approve · other provider" button sets this).
-
-### Who writes files
-
-```mermaid
-flowchart LR
-  BRAIN["chat / planner brain<br/>read-only"] -- "returns document" --> UC[use case] -- "writes" --> FS[(data/)]
-  BRAIN -. never .-> FS
-  WORKER["worker brain<br/>write=true"] -- "files, report" --> WD["work dir<br/>(coding: project repo + work dir)"]
-```
-
-Chat and planning stay read-only. Only the worker gets `write=True`, with `cwd` = its work dir
-(the project repo for `coding` tasks, plus the work dir via `extra_dirs`).
-
-| Provider | Read mode | Write mode (worker) |
-|---|---|---|
-| Codex | `-s read-only` | `-s workspace-write`, network on, `web_search=live`, `--add-dir` for extra dirs; kernel-sandboxed by bubblewrap |
-| Claude | tools `Read,Grep` | tools `Read,Grep,Glob,Write,Edit,Bash,WebSearch,WebFetch`, `acceptEdits`; permission rules only, no kernel sandbox |
-
-With `BROWSER_CDP_URL` set, write mode also attaches an MCP server named `browser`
-(`@playwright/mcp` via `npx`, `--cdp-endpoint`) to both providers. Read-only browsing, "never
-submit" and "never send" are prompt rules in `prompts/work.md` and `work_brain.py`, not enforced.
-
-Why Codex read mode is read-only: `workspace-write` needs bubblewrap; Ubuntu 24.04 blocks
-unprivileged userns. `deploy/apparmor-bwrap` (per-binary profile) lets shell commands run in the sandbox.
-
-### One Codex call
-
-```mermaid
-flowchart LR
-  T[BrainTask] --> CMD["codex exec -o TMP.json -m M -c model_reasoning_effort=E<br/>-s read-only | workspace-write -C CWD --ignore-user-config<br/>--output-schema prompts/output_schema.json -- PROMPT"]
-  CMD -- "stdin closed · no timeout; streamed runs stall-guard at 60 min of silence" --> TMP[TMP.json]
-  TMP --> R[BrainResult] --> DEL[TMP deleted]
-  CMD -- "non-zero / stalled / cancelled" --> ERR["reply: brain error: <stderr tail>"]
-```
-
-Streaming: when `BrainTask.on_step` is set (worker, replan, scout), Codex adds `--json` (JSONL events on
-stdout, `-o` still holds the answer) and Claude uses `--output-format stream-json --verbose` (the closing
-`result` event is the json-mode output). `adapters/brain/stream.py` reads stdout line by line, enforces the
-stall guard and cancel() (kill the process group) and maps tool calls to short lines ("ran `ls`", "edited a.txt").
-Unknown or broken events are skipped. Without `on_step` the commands are unchanged.
-
-No brain timeouts: getting a task done matters more than waiting. Two stops remain, both in
-`stream.py`: the stall guard (no stdout line for 60 minutes kills the process group, "brain error: stalled")
-and `/cancel` (`handle_update` checks that `state["executor_pid"]` is alive and is `mentor job work` via
-`/proc/<pid>/cmdline`, then sends SIGUSR1; SIGTERM keeps meaning exit; the executor's handler calls
-`stream.cancel()`, the run returns "brain error: cancelled", and the job or task fails normally while the loop goes on).
-Only `mentor doctor` (180 s) and Telegram network calls keep timeouts.
-
-`--ignore-user-config`: this machine's `~/.codex/config.toml` routes to a local proxy and MCP servers that hang headless.
-
-### Allowed models (`domain/settings.py`)
-
-```mermaid
-flowchart LR
-  subgraph codex
-    A["gpt-5.5 · low..xhigh"]
-    B["gpt-5.6-luna · low..max"]
-    C["gpt-5.6-sol/terra · low..ultra"]
-    D["gpt-reserve · low..max"]
-  end
-  subgraph claude
-    E["haiku · low..high"]
-    F["sonnet · opus · fable · claude-opus-5-5 · low..max"]
-  end
-  CHAT[chat default] --> A
-  PLAN[plan and heavy defaults] --> C
-```
-
-## 6. Task graph and work loop
-
-`data/tasks.json` is the source of truth. `data/plan.md` and the pinned message are rendered
-from it by `apply_plan.refresh` after every change (Next / In progress / Waiting on you / Failed /
-Then / Done n of m). Replan and reconcile get a compact `tasks.brief` (one line per live task) and
-return a patch, `{"ops": [...]}`: `add {task, after}`, `set {id, fields}` (status only todo, done or dropped;
-running and awaiting tasks keep their status and are reported), `move {id, after}`. `task_ops.apply_ops`
-skips unknown ids and reports them; validation (cycles, unknown deps) rejects the whole patch on error.
-Reconcile dry-runs its ops, stores them in the check-in state and applies them on Approve through
-`apply_plan.run`. A document with `"tasks"` instead (first run, "rebuild the plan") is parsed and merged so
-runtime fields (`files`, `approved`, `provider`, `proposal`) and non-final statuses survive.
-
-### Queue and executor
-
-`state.json["jobs"]` is a durable list of `replan {reason}` jobs (`usecases/queue.py`). Reconcile is not
-queued: it only proposes ops (Approve applies them under the lock), so it runs where it is triggered and the
-brief never waits behind a task. A chat replan is enqueued at once under `data/.lock` (so its position and
-its order against any kick in the same answer are right); after the chat answer is sent, `announce` posts
-`🕒 Queued (2nd): Replanning` as a reply and stores its id if the job is still untaken. The executor adopts that
-message as its progress message (or sends its own if it got there first). Every executor message for a job
-(summary, "Plan not changed", patch notes, "Gave up on …") replies to the requesting message. Ad-hoc user work is not a job: the chat action `add_task` inserts a task at the
-top of `tasks.json` and kicks the executor, so it is the next ready task. Task `kind` only routes the model tier.
-`take` counts attempts; a job taken twice without finishing is dropped with "Gave up on …".
-
-Task: `id`, `title`, `project`, `kind` (`research` `writing` `coding` `system` `user`), `deps`,
-`due`, `status`, `note`, plus runtime fields. The next task is the first `todo` in list order
-whose deps are all `done` or `dropped`, so a parked, failed or awaiting task blocks its dependents.
-
-### Statuses
-
-```mermaid
-stateDiagram-v2
-  [*] --> todo: replan or check-in Approve
-  todo --> running: worker claims it
-  running --> done: outcome done
-  running --> awaiting_approval: outcome needs_approval
-  running --> awaiting_user: needs_user or a user task parked
-  running --> failed: outcome failed or brain error
-  running --> todo: worker restart resets a stale running
-  awaiting_approval --> todo: button Approve or Approve other provider, approved set
-  awaiting_approval --> awaiting_user: button Reject, note asks what instead
-  awaiting_user --> done: button Done
-  failed --> todo: chat task_update todo is retry
-  todo --> done: chat task_update done or replan
-  awaiting_user --> done: chat task_update done
-  todo --> dropped: chat task_update dropped or replan
-  done --> [*]
-  dropped --> [*]
-```
-
-Chat `task_update` accepts only `todo`, `done`, `dropped` for any task id; replan may only set
-those same three. Buttons are compare-and-set: a press on a task no longer in the expected
-status answers "Already handled." Approve with another provider sets `task.provider`.
-
-### One loop iteration
-
-```mermaid
-flowchart TB
-  K["kick: button · work · add_task · task_update · replan · morning job<br/>serve startup · or hourly timer"] --> LK["wait for data/.work.lock<br/>(blocking flock)"]
-  LK --> RS["reset stale running to todo"] --> JB
-  JB["drain queued jobs first<br/>replan, no daily budget"] --> CL
-  CL["claim under data/.lock: first ready task"] --> RD{"ready task?"}
-  RD -- none --> FIN
-  RD -- yes --> UT{"kind = user?"}
-  UT -- yes --> PK["park: awaiting_user<br/>send 'Your turn' + Done button<br/>no brain call, no budget"]
-  UT -- no --> BG{"daily runs left?<br/>work.daily_runs"}
-  BG -- no --> FIN
-  BG -- yes --> BR["brain run in work dir<br/>tier by kind"]
-  BR --> OC{"task_result outcome"}
-  OC -- done --> T1["finalize progress message + files + email drafts"]
-  OC -- needs_user --> T2["send report + files + drafts<br/>+ exact action + Done button"]
-  OC -- needs_approval --> T3["send proposal<br/>Approve · Approve other provider · Reject"]
-  OC -- "failed or missing" --> T4["progress message: Failed + reply"]
-  T1 & T2 & T3 & T4 --> NX[next ready task]
-  PK --> NX
-  NX --> JB
-  FIN["send 'Work loop finished' summary<br/>refresh plan.md and pin"]
-```
-
-Progress message (`usecases/progress.py`): each worker run, replan and scout posts one HTML message
-(`Chat.send_html`) — `⏳ title`, `kind · provider model · effort E · elapsed`, the step log in a
-`<blockquote>` — re-rendered every 10 s by a daemon thread (`edit_html`). On finish the same message
-becomes `✅ Done` / `🟡 Prepared` / `🟠 Needs approval` / `❌ Failed` / `⚪ Cancelled` (after `/cancel`), total time, the log collapsed
-(`<blockquote expandable>`) and, for worker tasks, the brief plus the files list; replan and scout end
-with just the status and keep their usual reply. It stays under 4096 chars: older steps are counted as
-"(N earlier steps in steps.md)", a long brief is cut with "…" (full text in `report.md`). Every step
-is also appended with a timestamp to `steps.md` in the work dir. Telegram errors are printed, never raised.
-Buttons, files and drafts follow as separate plain-text messages.
-
-Details:
-
-- Work dir: `data/projects/<name>/work/<task id>/` (`data/work/<id>/` without a project). Dependencies'
-  `report.md` paths and files are listed in the prompt as inputs.
-- A run that is not a `user` task costs one of `work.daily_runs` (default 12 per day, counted in
-  `state.json` `work`). Past the budget the loop stops and says so.
-- Files are sent only from the work dir or project repo, up to 50 MB each. Email drafts go to Gmail
-  Drafts over IMAP (`adapters/mail/imap.py`, `Mail.draft`); with no mail configured, or on an
-  IMAP error, the draft text is sent in Telegram instead. Nothing is ever sent as email.
-- Single instance: `mentor job work` takes `data/.work.lock` with a blocking flock, so a kicked process waits its
-  turn and drains the queue; the waiter holds `data/.kick.lock` until it gets the work lock, so `kick()` does
-  not spawn (and a second waiter exits) while one already waits; it records `state["executor_pid"]` for `/cancel`. Kicked runs
-  (`app/kick.py`, detached subprocess) log to `data/work.log`. `mentor.service` uses `KillMode=process`, so a
-  `serve` restart does not kill the executor.
-
-## 7. Projects are folders
-
-```mermaid
-flowchart LR
-  subgraph data/projects
-    T[project-one/] ~~~ C[project-two/] ~~~ N[project-three/]
-  end
-  T & C & N --> F["project.md (repo: line)<br/>timeline.md · plan.md"]
-  F --> DISC[Store.projects discovers folders at run time]
-  DISC --> MB[morning brief merges items by date]
-  DISC --> GP["data/plan.md → pinned message"]
-  DISC --> SC["scout reads only that repo_path"]
-  ADD["\"add project x at ~/dev/x\""] -- add_project --> N
-```
-
-## 8. Scheduler is the command line
-
-```mermaid
-flowchart LR
-  CR[cron · deploy/crontab] --> J
-  SD["systemd user timers ← running now<br/>mentor-{morning,deadline,replan,compact,work}.timer"] --> J
-  IP["in-process thread<br/>mentor serve --with-scheduler"] --> J
-  J["mentor job morning | deadline | replan | compact | work"] --> L[flock data/.lock]
-  L --> ID{done today?<br/>state.json}
-  ID -- yes --> NO[no-op]
-  ID -- no --> RUN[use case] --> MARK[mark state.json]
-  J -. "work: own lock data/.work.lock, no daily mark" .-> WL[executor]
-  RUN -. "replan: push job" .-> QU[("jobs queue")]
-  QU --> WL
-  J -. "morning · deadline · replan then run the executor" .-> WL
-```
-
-| Job | When (Europe/Kyiv) | Brain |
-|---|---|---|
-| morning check-in → brief | daily 08:00 | chat; plan tier if reconciling |
-| check-in deadline | daily 09:00 | plan tier (reconcile, inline) if still pending |
-| replan | Sunday 20:00 | plan tier (queued job) |
-| compact | Sunday 21:00 | chat settings |
-| work (executor) | hourly safety net, plus kicks | replan jobs: plan tier; tasks: `heavy` or `coder` per kind |
-
-The morning and deadline jobs reconcile inline, the replan job queues a job; all then run the executor in-process
-(under the in-process scheduler they kick it instead). A chat replan, a button press (other than Reject),
-and the chat actions `work`, `add_task` and `task_update` kick it too. Check-in Approve does not kick; the
-next kick or the hourly timer picks the new tasks up.
-
-### Morning check-in
-
-```mermaid
-flowchart TB
-  M["08:00 morning_checkin"] --> W{user wrote since<br/>last brief?}
-  W -- yes --> R
-  W -- no --> Q["'No updates… not done?' [Yes] [No]<br/>checkin.stage = asked"]
-  Q -- Yes --> R
-  Q -- No --> AW["'send updates by 09:00'<br/>stage = awaiting_updates"]
-  AW -- chat message --> R
-  Q & AW -- "09:00 deadline job" --> R
-  R["reconcile (inline, not queued) · plan tier<br/>prompts/reconcile.md"] -- "document null" --> B[morning brief]
-  R -- ops --> P["proposal [Approve] [Reject]<br/>stage = proposed · plan.md untouched"]
-  P -- Approve --> AP["apply_plan: tasks.json → plan.md · edit pin"] --> B
-  P -- Reject --> RJ["'What should I change instead?'<br/>next message → normal chat"]
-```
-
-State lives in `state.json` `checkin`; each transition is claimed under `data/.lock`, so a button
-and the 09:00 job never both act. Any reconcile failure (exception, brain error, invalid proposal) clears the
-check-in and sends the brief once.
-
-Known limits, kept on purpose: `apply_plan.refresh` edits the pinned message (a network call) while holding
-`data/.lock`, and non-streaming chat calls have no stall guard. A press on a stale stage or old message → "Already handled."
-
-## 9. Memory
-
-```mermaid
-flowchart LR
-  subgraph "every brain call"
-    F[fresh session] --> CTX["summary.md + last 2 day files<br/>+ project list + task"]
-  end
-  CTX -.-> G["brain may Grep data/history/"]
-  subgraph "weekly compact"
-    OLD[days older than 14] --> CH[cheap brain] --> SUM[summary.md]
-  end
-  SUM --> CTX
-  CHAT[each message + reply] --> DAY["history/YYYY-MM-DD.md<br/>append-only, written by store"]
-```
-
-```mermaid
-flowchart TB
-  NOW["now: Markdown + Read/Grep · zero code"] --> Q{Grep insufficient?}
-  Q -- no --> NOW
-  Q -- yes --> MCP["adapters/mcp/memory_server.py · stdio"]
-  MCP --> C1[claude --mcp-config] & C2[codex mcp_servers] & C3[Agent SDK options]
-```
-
-## 10. Files
-
-```
-mentor/
-  domain/      settings.py actions.py project.py conversation.py tasks.py task_ops.py
-  usecases/    handle_update.py handle_message.py busy.py queue.py add_task.py send_files.py morning_brief.py replan.py
-               scout.py compact.py change_settings.py add_project.py send_image.py
-               morning_checkin.py checkin.py checkin_state.py reconcile.py
-               apply_plan.py work.py work_brain.py work_result.py progress.py task_buttons.py task_update.py
-  ports/       chat.py brain.py store.py clock.py renderer.py mail.py
-  adapters/    telegram/{api,markdown,fake}.py  brain/{router,codex_cli,claude_cli,stream,fake}.py
-               store/{files,lock}.py  scheduler/inprocess.py  render/{kroki,fake}.py  mail/imap.py
-  app/         config.py container.py cli.py jobs.py kick.py
-data/          tasks.json plan.md settings.json state.json work.log history/
-               projects/{_template,<name>}/{...,work/<task id>/}
-prompts/       mentor.md replan.md reconcile.md work.md scout.md morning.md compact.md output_schema.json
-deploy/        crontab mentor.service mentor-*.{service,timer} (incl. mentor-work) apparmor-bwrap README.md
-tests/         unit/ usecases/ e2e/     scripts/live_smoke.sh     Dockerfile compose.yml
-```
-
-| Change… | Where |
+| Path | What |
 |---|---|
-| personality, rules | `prompts/mentor.md` |
-| a project's deadlines | `data/projects/<name>/timeline.md`, or tell the bot |
-| chat / plan / heavy / coder model | tell the bot (`set_settings`) → `data/settings.json` |
-| coder model, work budget | `data/settings.json` `coder`, `work.daily_runs` |
-| what the worker may do alone | `prompts/work.md` (a prompt rule, not enforced) |
-| task kinds, statuses, ordering | `domain/tasks.py` |
-| a task's outcome handling, buttons | `usecases/work_result.py`, `task_buttons.py` |
-| email drafts | `adapters/mail/imap.py`; `GMAIL_USER`, `GMAIL_APP_PASSWORD` |
-| allowed models | `domain/settings.py` ALLOWED |
-| when jobs run | active scheduler (`deploy/`) |
-| Telegram → Slack | new `adapters/` folder + one line in `container.py` |
+| `mentor/domain/tasks.py` | `Agenda` (aims + tasks, each optionally in a project), validated ops, `render` |
+| `mentor/domain/agent.py`, `settings.py` | `AgentRun` / `AgentResult` / `Sandbox`; model tiers per role |
+| `mentor/adapters/agent/` | `codex.py`, `claude.py` (CLI command + event parsing), `agents.py` (by provider), `stream.py` (JSONL runner with stall kill), `secrets.py` (deny-read list, env scrub), `mentor_mcp.py` |
+| `mentor/adapters/store/` | `files.py` (state, agenda + events, history, context, days, projects), `jobs.py` (`JobBook`), `lock.py` |
+| `mentor/adapters/telegram/` | Bot API over urllib; Markdown → Telegram HTML with plain-text fallback |
+| `mentor/mcp/` | `server.py` (stdio JSON-RPC), `tools.py` (tool table per role) |
+| `mentor/usecases/` | `gateway`, `chat_turn`, `jobs`, `job_run`, `job_progress`, `job_announce`, `morning`, `migrate`, `recall`, `oneshot`, `send_image`, `add_project` |
+| `prompts/` | `chat.md`, `job.md`, `morning.md`, `migrate.md` |
 
-## 11. Config and secrets
+## Data (`DATA_DIR`, its own git repo)
 
-```mermaid
-flowchart LR
-  ENV[".env (gitignored, 600)<br/>TELEGRAM_BOT_TOKEN · TELEGRAM_CHAT_ID · DATA_DIR · TZ · KROKI_URL<br/>GMAIL_USER · GMAIL_APP_PASSWORD"] --> CFG[app/config.py]
-  OAUTH["CLAUDE_CODE_OAUTH_TOKEN (optional)"] --> CFG
-  CDP["BROWSER_CDP_URL (optional)"] -. "read from os.environ by the brain adapters" .-> CT
-  CODEX["~/.codex/auth.json"] --> CX[codex exec]
-  CFG --> CT[container.py]
-  ENV -. never .-> DATA[(data/ volume)]
-```
+`tasks.json` (aims, tasks; `project` = a folder name under `projects/`, a task defaults to its aim's), `events.jsonl` (every task op, `by` chat/morning/user), `state.json` (`last_update_id`,
+`chat {tier, session}`, `last_morning`), `history/<date>.md` (transcript), `context.md`, `days/<date>.md`,
+`jobs/<N>/{brief.md, job.json (+ `status_msg`), steps.log, run.log, result.json, out/}`, `projects/<name>/project.md` (`repo:` line),
+`settings.json` (tiers), `legacy/tasks-v2.json`, `migration/tasks.json`.
 
-## 12. Tests
+## Key decisions and pitfalls
 
-```mermaid
-flowchart LR
-  subgraph "tests/ · 220 · no network"
-    U[unit: settings · store · markdown] --> UC[usecases: fake brain + fake chat]
-    UC --> E2E["e2e: Bot API stub (http.server) + fake brain<br/>full day: chat → settings → replan → morning → compact"]
-  end
-  E2E --> LIVE["scripts/live_smoke.sh · real Telegram + Codex<br/>6 steps, screenshots in tests/e2e/evidence/"]
-```
+- **Chat speed.** `codex exec` with the user config takes ~17 s per turn (plugins, skills, MCP startup); with
+  `--ignore-user-config` and only the mentor MCP, ~5 s per resumed turn. Jobs keep the user config for its MCPs.
+- **Models.** The ChatGPT login rejects `gpt-6-luna` and `gpt-6.1-sol`; chat uses `gpt-5.6-luna`, jobs and morning
+  `gpt-6-astra`. Claude: user settings break headless Haiku (`system.5.type`), so chat fallback passes
+  `--setting-sources ""`.
+- **Language.** luna drifts into Russian after tool calls. Every turn gets a pin (`(Reply in English.)` for Latin
+  script, Ukrainian for Cyrillic, never Russian); prompts say the same.
+- **Sessions.** One per day; the morning job clears it. A broken resume restarts from a seed with today's transcript.
+  A Codex usage limit (`hit your usage limit` in `turn.failed`/`error`) moves chat to Claude Haiku for the rest of
+  the day and reruns a job on Claude Opus.
+- **Sandbox.** Codex permission profile `-c permissions.mentor.filesystem={...}` + `default_permissions="mentor"`.
+  Codex deny-read globs fail on unreadable dirs under `~/dev`, so `secrets.py` lists files by exact (resolved) path;
+  a symlink in the deny list makes bwrap refuse to start. Claude fallback: sandbox settings with `Read(...)` deny and
+  `Edit(...)` allow rules, network `allowedDomains: ["*"]`. Test outside a model: `codex sandbox -c ... -P mentor -- cmd`.
+- **Jobs outlive the service** (`start_new_session`, `KillMode=process`). Cancel = status `cancelled` + SIGTERM to the
+  runner's process group; a runner that vanished is reaped as failed. Reports are announced once (`announced`).
+- **One message per job** (the etymology_bot pattern: a message edited in place). The chat reply that started a job
+  ("job 7 started", a reply to the user's message) gets the job's elapsed time and last 3 steps, edited at most every
+  10 s. When it ends, the steps fold into an expandable blockquote and the report follows in the same message; files
+  come as replies to it. The report reaches the chat agent with the user's next message, without a turn of its own.
+- **MCP children get few env vars**: `DATA_DIR` and `TZ` are passed explicitly; `.env` is read from the repo cwd.
+- **Telegram calls fail now and then** (TLS handshake timeouts): replies and reaction clears are retried 3 times; the
+  chat worker never dies on one failed turn.
 
-## 13. Hosting now and later
+## Verification (2026-10-11, live through Telegram Web)
 
-```mermaid
-flowchart LR
-  subgraph now["now: one process, long-poll"]
-    TG1[Telegram] <-- getUpdates --> P1["mentor serve<br/>systemd user unit · or Docker on a VM"]
-    P1 --- V1[(data/)]
-  end
-  subgraph later["later: webhook ingress + worker"]
-    TG2[Telegram] -- webhook --> ING["ingress fn (Vercel/Lambda)<br/>verify secret · dedup · ack"]
-    ING --> Q[queue] --> WK["worker (VM / Lambda container)<br/>runs codex/claude"]
-    WK --- V2[(S3 store)]
-  end
-```
-
-Already in place for "later": `handle_update` is the single inbound entry, no memory between updates, `Store` is a port, config from env only.
-
-```mermaid
-flowchart TB
-  subgraph compose.yml
-    IMG["python:3.12-slim + node<br/>@anthropic-ai/claude-code · @openai/codex"] --> C["container · user 1000:1000<br/>mentor serve --with-scheduler"]
-    C --- D["./data → /data"]
-    C --- S["~/.codex → /secrets/codex (CODEX_HOME)"]
-  end
-```
+Chat reply, task add/pause/resume/rename with "it" resolution, memory across a session restart, research job with a
+file, code job on a worktree branch (not pushed), parallel jobs, cancel, server restart mid-job, diagram, forced
+usage limit (chat on Haiku, job on Opus), morning post + fresh session. Secrets: `codex sandbox` with the real deny
+list denies `~/.ssh`, `.env`, `auth.json`; `git push` over ssh fails in the job environment.

@@ -49,9 +49,9 @@ class FakeChat:
         self.photos.append((png, caption))
         return self.send(f"[photo] {caption}")
 
-    def send_document(self, data: bytes, filename: str, caption: str = "") -> int:
+    def send_document(self, data: bytes, filename: str, caption: str = "", reply_to: int | None = None) -> int:
         self.documents.append((filename, caption, len(data)))
-        return self.send(f"[document] {filename} {caption}".strip())
+        return self.send(f"[document] {filename} {caption}".strip(), reply_to=reply_to)
 
     def edit(self, id: int, text: str) -> None:
         self.edits.append((id, text))

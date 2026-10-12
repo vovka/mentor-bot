@@ -1,8 +1,8 @@
 [Unit]
-Description=Mentor bot: morning brief timer
+Description=Mentor bot: morning job timer (prepares at 07:30, posts at 08:00)
 
 [Timer]
-OnCalendar=*-*-* 08:00 Europe/Kyiv
+OnCalendar=*-*-* 07:30 Europe/Kyiv
 Persistent=true
 
 [Install]

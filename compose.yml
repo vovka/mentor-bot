@@ -1,4 +1,11 @@
 services:
+  test:
+    build:
+      context: .
+      target: test
+    user: "1000:1000"
+    volumes:
+      - .:/app:ro
   mentor:
     build: .
     user: "1000:1000"  # run as the host user so ~/.codex and ./data stay owned by you
@@ -9,3 +16,4 @@ services:
       - ./data:/data
       - ~/.codex:/secrets/codex
     restart: unless-stopped
+    profiles: [runtime]

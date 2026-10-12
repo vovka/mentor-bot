@@ -1,6 +1,0 @@
-CRON_TZ=Europe/Kyiv
-0 8 * * * cd ~/dev/mentor-bot && .venv/bin/mentor job morning >> data/jobs.log 2>&1
-0 9 * * * cd ~/dev/mentor-bot && .venv/bin/mentor job deadline >> data/jobs.log 2>&1
-0 20 * * 0 cd ~/dev/mentor-bot && .venv/bin/mentor job replan >> data/jobs.log 2>&1
-0 21 * * 0 cd ~/dev/mentor-bot && .venv/bin/mentor job compact >> data/jobs.log 2>&1
-0 * * * * cd ~/dev/mentor-bot && .venv/bin/mentor job work >> data/jobs.log 2>&1

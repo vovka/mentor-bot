@@ -1,4 +1,7 @@
-"""MarkdownV2 escaping and Telegram message chunking (stdlib only)."""
+"""Markdown → Telegram HTML, MarkdownV2 escaping and message chunking (stdlib only)."""
+
+import html
+import re
 
 _RESERVED = r"_*[]()~`>#+-=|{}.!"
 
@@ -27,3 +30,28 @@ def chunk(text: str, limit: int = 4096) -> list[str]:
     if current:
         chunks.append(current)
     return chunks or [""]
+
+
+_INLINE = [
+    (re.compile(r"`([^`\n]+)`"), r"<code>\1</code>"),
+    (re.compile(r"\*\*(.+?)\*\*"), r"<b>\1</b>"),
+    (re.compile(r"__(.+?)__"), r"<b>\1</b>"),
+    (re.compile(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])"), r"<i>\1</i>"),
+    (re.compile(r"(?<!\w)_(?!\s)(.+?)(?<!\s)_(?!\w)"), r"<i>\1</i>"),
+    (re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)"), r'<a href="\2">\1</a>'),
+]
+
+
+def to_html(text: str) -> str:
+    """The Markdown agents write (bold, italics, `code`, ```blocks```, links, # headings) as Telegram HTML."""
+    parts = re.split(r"```(?:\w+)?\n?(.*?)```", text, flags=re.S)
+    out = []
+    for i, part in enumerate(parts):
+        if i % 2:
+            out.append(f"<pre>{html.escape(part.rstrip())}</pre>")
+            continue
+        part = re.sub(r"^#{1,6} +(.+)$", r"**\1**", html.escape(part, quote=False), flags=re.M)
+        for pattern, repl in _INLINE:
+            part = pattern.sub(repl, part)
+        out.append(part)
+    return "".join(out)

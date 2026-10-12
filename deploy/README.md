@@ -1,54 +1,42 @@
 # Deploy
 
-## Option A: cron
+The bot runs on the host as systemd `--user` units: its agents need the desktop, your Chrome, your MCP servers
+and `~/dev`, which a container would hide. Docker is for tests only (`docker compose run --rm test`).
 
-    crontab deploy/crontab
+## Install (first time, or after switching from v2)
 
-## Option B: systemd --user
+    # stop and remove the v2 timers
+    systemctl --user disable --now mentor-work.timer mentor-deadline.timer mentor-replan.timer mentor-compact.timer
+    rm ~/.config/systemd/user/mentor-{work,deadline,replan,compact}.{service,timer}
+    rm -r ~/.config/systemd/user/mentor-work.service.d
 
-    cp deploy/mentor.service deploy/mentor-{morning,deadline,replan,compact,work}.{service,timer} \
-      ~/.config/systemd/user/
+    cp deploy/mentor.service deploy/mentor-morning.{service,timer} ~/.config/systemd/user/
     systemctl --user daemon-reload
-    systemctl --user enable --now mentor.service \
-      mentor-morning.timer mentor-deadline.timer mentor-replan.timer mentor-compact.timer mentor-work.timer
+    systemctl --user enable --now mentor.service mentor-morning.timer
 
-`mentor-work.timer` runs `mentor job work` hourly as a safety net. The bot also starts the worker
-itself after button presses, `work`, `add_task` and `task_update` chat actions, replan and the morning job;
-only one worker runs at a time (`data/.work.lock`); a second start waits for the lock and then drains
-whatever is queued (at most one waits, holding `data/.kick.lock`; further starts exit). `/cancel` in chat
-sends SIGUSR1 to the running worker, which kills only the brain run in progress.
+`loginctl enable-linger $USER` keeps them running without a login session.
 
-`mentor.service` uses `KillMode=process`: a restart stops only `mentor serve` (it waits up to
-`TimeoutStopSec=300` for in-flight messages), while a running executor survives and keeps the old
-code until it exits. SIGTERM to the executor just stops it; the task it left `running` goes back to todo
-on the next start. The new `serve` kicks the executor on startup to drain leftover jobs.
+## What runs
 
-Worker logs: a worker started by the bot writes to `data/work.log`; a run from the timer goes to
-the journal (`journalctl --user -u mentor-work`); cron appends to `data/jobs.log`.
+- `mentor.service`: `mentor serve`. Telegram long-poll, the chat agent (one `codex exec`/`resume` per turn),
+  and a job watcher that every 2 s launches queued jobs, reaps dead ones and reports finished ones.
+- Each job is a detached `mentor job-run <id>` in its own session. `KillMode=process` keeps running jobs
+  alive across a service restart; the restarted service still reports them.
+- `mentor-morning.timer`: 07:30 `mentor morning`. It summarizes yesterday, rewrites `data/context.md`, ranks
+  the tasks, waits until 08:00, posts the priorities and starts a fresh chat session.
 
-### PATH for `npx` (browser access)
+Logs: `journalctl --user -u mentor -u mentor-morning`; per job `data/jobs/<id>/{run.log,steps.log}`.
 
-With `BROWSER_CDP_URL` set, the worker starts the Playwright MCP server through `npx`. A systemd
-user service does not get the nvm bin directory, so `npx` is not found. Set `PATH` in `.env`
-(for example `PATH=/home/you/.nvm/versions/node/<version>/bin:/usr/local/bin:/usr/bin:/bin`) or
-with `Environment=PATH=...` in `mentor.service` and `mentor-work.service`. The bot's own
-`mentor.service` needs it too, because workers it kicks inherit its environment. Chrome must be
-running with remote debugging on the port in `BROWSER_CDP_URL`.
+## Environment (`.env`)
 
-## Option C: Docker
-
-    docker compose build
-    docker compose up -d
-    docker compose exec mentor mentor doctor
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DATA_DIR`, `TZ`, and a full `PATH` (systemd user services do not
+get the nvm bin dir, and MCP servers started through `npx` need Node 24). Optional: `KROKI_URL`,
+`CODEX_BIN` / `CLAUDE_BIN` (other CLI binaries; also how the usage-limit fallback is tested with a stub).
 
 ## Codex sandbox on Ubuntu 24.04
 
-Ubuntu blocks unprivileged user namespaces, so Codex's bubblewrap sandbox cannot start and
-shell commands inside `codex exec` fail. Grant the capability to bubblewrap only (safer than
-turning the global restriction off):
+Ubuntu blocks unprivileged user namespaces, so Codex's bubblewrap sandbox cannot start. Grant the
+capability to bubblewrap only:
 
     sudo cp deploy/apparmor-bwrap /etc/apparmor.d/bwrap
     sudo apparmor_parser -r /etc/apparmor.d/bwrap
-
-Verify: `codex exec --ignore-user-config -s read-only -- "run: ls" </dev/null` no longer warns
-about bubblewrap. `loginctl enable-linger $USER` keeps the timers running without a login session.

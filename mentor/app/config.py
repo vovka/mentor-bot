@@ -1,6 +1,7 @@
 """Config from environment, with a minimal .env loader for local runs."""
 
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,22 +22,21 @@ class Config:
     telegram_bot_token: str
     telegram_chat_id: str
     data_dir: Path
-    tz: str
-    claude_code_oauth_token: str
     kroki_url: str
-    gmail_user: str
-    gmail_app_password: str
+    codex_bin: str
+    claude_bin: str
 
     @classmethod
     def from_env(cls) -> "Config":
         _load_dotenv(Path(".env"))
+        time.tzset()  # TZ may come from .env; local times (history, morning) follow it
+        data_dir = Path(os.environ.get("DATA_DIR", "./data")).resolve()
+        os.environ["DATA_DIR"] = str(data_dir)  # child processes (MCP server, job runner) get the same folder
         return cls(
             telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
             telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
-            data_dir=Path(os.environ.get("DATA_DIR", "./data")),
-            tz=os.environ.get("TZ", "Europe/Kyiv"),
-            claude_code_oauth_token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", ""),
+            data_dir=data_dir,
             kroki_url=os.environ.get("KROKI_URL", "https://kroki.io"),
-            gmail_user=os.environ.get("GMAIL_USER", ""),
-            gmail_app_password=os.environ.get("GMAIL_APP_PASSWORD", ""),
+            codex_bin=os.environ.get("CODEX_BIN", "codex"),
+            claude_bin=os.environ.get("CLAUDE_BIN", "claude"),
         )

@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
-from mentor.adapters.telegram.markdown import chunk
+from mentor.adapters.telegram.markdown import chunk, to_html
 from mentor.domain.conversation import Update
 
 _CALL_TIMEOUT = 10
@@ -36,11 +36,18 @@ class TelegramChat:
         parts = chunk(text)
         msg_id = 0
         for i, part in enumerate(parts):
-            params = {"chat_id": self._chat_id, "text": part, **_reply(reply_to if i == 0 else None)}
+            params = {"chat_id": self._chat_id, "text": to_html(part), "parse_mode": "HTML",
+                      **_reply(reply_to if i == 0 else None)}
             if buttons and i == len(parts) - 1:
                 row = [{"text": label, "callback_data": data} for label, data in buttons]
                 params["reply_markup"] = {"inline_keyboard": [row]}
-            msg_id = self._call("sendMessage", params, _CALL_TIMEOUT)["result"]["message_id"]
+            try:
+                msg_id = self._call("sendMessage", params, _CALL_TIMEOUT)["result"]["message_id"]
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:  # 400 = Telegram rejected the HTML: send the chunk as it was written
+                    raise
+                params.update(text=part, parse_mode=None)
+                msg_id = self._call("sendMessage", params, _CALL_TIMEOUT)["result"]["message_id"]
         return msg_id
 
     def answer_callback(self, callback_id: str) -> None:
@@ -53,19 +60,29 @@ class TelegramChat:
     def send_photo(self, png: bytes, caption: str) -> int:
         return self._upload("sendPhoto", "photo", "diagram.png", png, caption, "image/png", _CALL_TIMEOUT * 3)
 
-    def send_document(self, data: bytes, filename: str, caption: str = "") -> int:
+    def send_document(self, data: bytes, filename: str, caption: str = "", reply_to: int | None = None) -> int:
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-        return self._upload("sendDocument", "document", filename, data, caption, content_type, _UPLOAD_TIMEOUT)
+        return self._upload("sendDocument", "document", filename, data, caption, content_type, _UPLOAD_TIMEOUT,
+                            reply_to)
 
-    def _upload(self, method, file_field, filename, data, caption, content_type, timeout) -> int:
+    def _upload(self, method, file_field, filename, data, caption, content_type, timeout, reply_to=None) -> int:
         fields = {"chat_id": self._chat_id, "caption": caption[:1024]}
+        if reply_to:
+            fields["reply_parameters"] = json.dumps({"message_id": reply_to})
         body, header = _multipart(fields, file_field, filename, data, content_type)
         req = urllib.request.Request(f"{self._base}/{method}", data=body, headers={"Content-Type": header})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())["result"]["message_id"]
 
     def edit(self, id: int, text: str) -> None:
-        self._edit({"chat_id": self._chat_id, "message_id": id, "text": text})
+        """Markdown like `send`; falls back to the plain text when Telegram rejects the HTML."""
+        params = {"chat_id": self._chat_id, "message_id": id, "text": to_html(text), "parse_mode": "HTML"}
+        try:
+            self._edit(params)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 400:
+                raise
+            self._edit({**params, "text": text, "parse_mode": None})
 
     def send_html(self, text: str, reply_to: int | None = None) -> int:
         params = {"chat_id": self._chat_id, "text": text, "parse_mode": "HTML", **_reply(reply_to)}
@@ -89,11 +106,10 @@ class TelegramChat:
         )
 
     def react(self, message_id: int, emoji: str | None) -> None:
+        """Raises on failure: callers decide whether a missing or stuck reaction matters."""
         reaction = [{"type": "emoji", "emoji": emoji}] if emoji else []
-        self._call_quietly(
-            "setMessageReaction",
-            {"chat_id": self._chat_id, "message_id": message_id, "reaction": reaction},
-        )
+        self._call("setMessageReaction", {"chat_id": self._chat_id, "message_id": message_id, "reaction": reaction},
+                   _CALL_TIMEOUT)
 
     def typing(self) -> None:
         self._call_quietly("sendChatAction", {"chat_id": self._chat_id, "action": "typing"})
